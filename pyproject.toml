@@ -1,0 +1,61 @@
+[project]
+name = "nano-rl"
+version = "0.1.0"
+description = "nano-rl"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    # Core ML
+    "torch>=2.9.0",
+    "transformers>=4.56.0",
+
+    # Data loading
+    "datasets>=4.0.0",
+    "torchdata>=0.11.0",           # StatefulDataLoader
+
+    # Logging & monitoring
+    "loguru>=0.7.3",
+
+    # Config & validation
+    "pydantic>=1.10.13",
+    "pydantic-settings>=2.10.1",
+    "tomli>=2.2.1",
+
+    # Type checking
+    "beartype>=0.21.0",
+    "jaxtyping>=0.3.2",
+
+    # Optional
+    "liger-kernel>=0.5.10",        # Efficient cross entropy loss
+]
+
+[project.optional-dependencies]
+flash-attn = [
+    "flash-attn @ https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.6.8/flash_attn-2.8.3+cu128torch2.9-cp312-cp312-linux_x86_64.whl",
+]
+
+[tool.uv]
+prerelease = "allow"
+no-build-isolation-package = ["flash-attn"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+
+[tool.uv.extra-build-dependencies]
+flash-attn = [{ requirement = "torch", match-runtime = true }]
+
+[tool.uv.extra-build-variables]
+flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
+
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
