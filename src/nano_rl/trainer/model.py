@@ -15,7 +15,7 @@ def setup_model(config: ModelConfig) -> nn.Module:
     """Load model from HF"""
     model_config = AutoConfig.from_pretrained(
         config.name,
-        attn_implementation=config.attn_implementation,
+        attn_implementation=config.attn,
         trust_remote_code=config.trust_remote_code,
     )
     # disable kv-cache for training

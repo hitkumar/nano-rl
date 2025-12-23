@@ -33,7 +33,7 @@ class TokenizerConfig(BaseConfig):
     ] = None
 
 
-class BaseOptimizerConfig(BaseConfig):
+class BaseOptimizerConfig(BaseModel):
     lr: Annotated[float, Field(ge=0)] = 1e-6
     weight_decay: Annotated[float, Field(ge=0)] = 0.01
     max_norm: Annotated[
@@ -41,19 +41,19 @@ class BaseOptimizerConfig(BaseConfig):
     ] = 1.0
 
 
-class AdamWConfig(BaseModel):
+class AdamWConfig(BaseOptimizerConfig):
     type: Literal["adamw"] = "adamw"
     betas1: Annotated[float, Field(ge=0)] = 0.9
     betas2: Annotated[float, Field(ge=0)] = 0.999
 
 
-class MuonConfig(BaseModel):
+class MuonConfig(BaseOptimizerConfig):
     type: Literal["muon"] = "muon"
     betas1: Annotated[float, Field(ge=0)] = 0.9
     betas2: Annotated[float, Field(ge=0)] = 0.999
 
 
-class SGDConfig(BaseModel):
+class SGDConfig(BaseOptimizerConfig):
     type: Literal["sgd"] = "sgd"
     nesterov: bool = True
     momentum: float = 0.9
