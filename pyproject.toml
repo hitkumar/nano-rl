@@ -33,6 +33,9 @@ dependencies = [
 flash-attn = [
     "flash-attn @ https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.6.8/flash_attn-2.8.3+cu128torch2.9-cp312-cp312-linux_x86_64.whl",
 ]
+dev = [
+    "pytest>=7.0.0",
+]
 
 [tool.uv]
 prerelease = "allow"
@@ -59,3 +62,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.metadata]
 allow-direct-references = true
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
