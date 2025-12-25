@@ -1,11 +1,15 @@
-from multiprocessing.sharedctypes import Value
-
 from nano_rl.trainer.config import OptimizerConfigType
 from torch import nn
+from torch.distributed.device_mesh import DeviceMesh
 from torch.optim import AdamW, Optimizer, SGD
 
 
-def setup_optimizer(config: OptimizerConfigType, model: nn.Module) -> Optimizer:
+def setup_optimizer(
+    config: OptimizerConfigType, model: nn.Module, device_mesh: DeviceMesh
+) -> Optimizer:
+    """
+    device_mesh is used by Muon optimizer only.
+    """
     match config.type:
         case "sgd":
             return SGD(

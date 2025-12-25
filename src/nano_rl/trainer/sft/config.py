@@ -123,6 +123,13 @@ class SFTTrainerConfig(BaseSettings):
         Field(description="Implementation of the cross entropy loss function to use."),
     ] = "torch"
 
+    dist_timeout_seconds: Annotated[
+        int,
+        Field(
+            description="Timeout in seconds for torch distributed ops. Defaults to 600 seconds.",
+        ),
+    ] = 600
+
     @model_validator(mode="after")
     def auto_setup_tokenizer(self):
         if self.tokenizer.name is None:

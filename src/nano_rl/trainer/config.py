@@ -133,6 +133,42 @@ class ModelConfig(BaseConfig):
         Field(description="The implementation to use for the model."),
     ] = "hf"
 
+    dp_replicate: Annotated[
+        int, Field(description="Data parallel dim where model weights are replicated")
+    ] = 1
+
+    ep: Annotated[
+        int,
+        Field(
+            description="Indicates how many GPUs experts are partitioned into, useful for MoE models"
+        ),
+    ] = 1
+
+    tp: Annotated[int, Field(description="Tensor parallel dim")] = 1
+
+    cp: Annotated[int, Field(description="context parallel")] = 1
+
+    optimization_dtype: Annotated[
+        Literal["bfloat16", "float32"],
+        Field(description="The dtype to use for model optimization"),
+    ] = "float32"
+
+    reduce_dtype: Annotated[
+        Literal["bfloat16", "float32"],
+        Field(description="The dtype to use for model reduce"),
+    ] = "float32"
+
+    fsdp_cpu_offload: Annotated[
+        bool, Field(description="Whether to enable CPU offloading during FSDP")
+    ] = False
+
+    reshard_after_forward: Annotated[
+        bool,
+        Field(
+            description="Whether to reshard each layer of the model after each forward pass"
+        ),
+    ] = True
+
     @model_validator(mode="after")
     def trust_remote_code_only_hf(self):
         """
@@ -144,4 +180,12 @@ class ModelConfig(BaseConfig):
                     f"Trust remove code only for HF impl, this one is {self.impl}"
                 )
 
+        return self
+
+    @model_validator(mode="after")
+    def cp_only_with_flash_attn(self):
+        if self.cp > 1 and self.attn not in ["flash_attention_2", "flash_attention_3"]:
+            raise ValueError(
+                "CP is only supported with flash attention 2 or flash attention 3"
+            )
         return self

@@ -11,6 +11,7 @@ from datasets import Dataset, load_dataset
 from jaxtyping import Bool, Int
 
 from nano_rl.trainer.sft.config import DataConfigType, LossMaskConfig
+from nano_rl.trainer.world import get_world
 from torch import Tensor
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.utils.data import IterableDataset
@@ -92,6 +93,7 @@ class SFTDataset(StatefulIterableDataset):
         loss_mask_config: LossMaskConfig = LossMaskConfig(),
         max_examples: int | None = None,
         max_epochs: int | None = None,
+        non_dp_size: int = 1,
     ):
         super().__init__()
         self.dataset = dataset
@@ -107,6 +109,14 @@ class SFTDataset(StatefulIterableDataset):
         if max_examples is not None:
             self.num_examples = min(self.num_examples, max_examples)
             self.dataset = dataset.take(max_examples)
+
+        world = get_world()
+        assert (
+            world.world_size % non_dp_size == 0
+        ), "World size should be a multiple of non_sp_size"
+        self.data_rank = world.rank // non_dp_size
+        # number of groups of GPUs that see different data during training
+        self.data_world_size = world.world_size // non_dp_size
 
     def _should_mask(self, message: dict) -> bool:
         """Check if message role contributes to the loss"""
@@ -243,6 +253,10 @@ class SFTDataset(StatefulIterableDataset):
                     else self.dataset
                 )
 
+            # this gpu shouldn't process this sample.
+            if (self.step - 1) % self.data_world_size != self.data_rank:
+                continue
+
             example = dataset[(self.step - 1) % self.num_examples]
             processed = self._process(example)
             if processed:
@@ -297,7 +311,7 @@ def cat_collate_fn(samples: list[Sample]) -> Batch:
 
 
 def setup_dataset(
-    tokenizer: PreTrainedTokenizer, config: DataConfigType
+    tokenizer: PreTrainedTokenizer, config: DataConfigType, non_dp_size: int = 1
 ) -> StatefulIterableDataset:
     if config.type == "fake":
         return FakeDataset(tokenizer.vocab_size, config.seq_len)
@@ -310,6 +324,7 @@ def setup_dataset(
         seed=config.seed,
         seq_len=config.seq_len,
         loss_mask_config=config.loss_mask,
+        non_dp_size=non_dp_size,
     )
 
 

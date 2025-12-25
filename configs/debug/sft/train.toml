@@ -1,13 +1,12 @@
-max_steps = 10
+max_steps = 100
 
 [model]
 name = "PrimeIntellect/Qwen3-0.6B"
-trust_remote_code = true
 
 [data]
 type = "sft"
 name = "willcb/R1-reverse-wikipedia-paragraphs-v1-1000"
-batch_size = 4
+batch_size = 16
 seq_len = 1024
 micro_batch_size = 1
 

@@ -3,51 +3,78 @@ SFT trainer
 """
 
 import time
+from datetime import timedelta
 
 import torch
-import torch.nn as nn
-from nano_rl.trainer.model import setup_model, setup_tokenizer
+import torch.distributed as dist
+from liger_kernel.transformers.cross_entropy import LigerCrossEntropyLoss
+from nano_rl.trainer.model import setup_fsdp, setup_model, setup_tokenizer
 from nano_rl.trainer.optim import setup_optimizer
+
+from nano_rl.trainer.parallel_dims import get_parallel_dims
 from nano_rl.trainer.scheduler import setup_scheduler
 from nano_rl.trainer.sft.config import SFTTrainerConfig
 from nano_rl.trainer.sft.data import setup_dataloader, setup_dataset
+from nano_rl.trainer.utils import print0, setup_torch_distributed
+from nano_rl.trainer.world import get_world
 from nano_rl.utils.pydantic_config import parse_argv
 from torch.nn import CrossEntropyLoss
 
 
 def train(config: SFTTrainerConfig):
+    # Setup distributed training
+    world = get_world()
+    # gloo is only needed for cpu offload
+    setup_torch_distributed(
+        timeout=timedelta(seconds=config.dist_timeout_seconds),
+        enable_gloo=config.model.fsdp_cpu_offload,
+    )
+    # This will only work correctly if placed after setup_torch_distributed.
     device = torch.device("cuda")
+    torch.set_float32_matmul_precision("high")
+
+    parallel_dims = get_parallel_dims(config.model, config.data.seq_len)
+    total_micro_batches = config.data.batch_size * parallel_dims.non_data_parallel_size
+    micro_batches_per_step = config.data.micro_batch_size * world.world_size
+    assert (
+        total_micro_batches % micro_batches_per_step == 0
+    ), f"total_micro_batches ({total_micro_batches}) % micro_batches_per_step ({micro_batches_per_step}) != 0"
+    grad_accum_steps = total_micro_batches // micro_batches_per_step
 
     # Model & tokenizer
-    print(f"Loading model: {config.model.name}")
-    model = setup_model(config.model).to(device)
 
-    print(f"Loading tokenizer: {config.tokenizer.name}")
+    print0(f"Loading model: {config.model.name}")
+    model = setup_model(config.model)
+    setup_fsdp(model, config.model, parallel_dims)
+    model.cuda()
+
+    print0(f"Loading tokenizer: {config.tokenizer.name}")
     tokenizer = setup_tokenizer(config.tokenizer)
 
     # Optimizer & scheduler
-    optimizer = setup_optimizer(config.optim, model)
+    optimizer = setup_optimizer(
+        config.optim, model, parallel_dims.world_mesh["dp_shard_cp"]
+    )
     scheduler = setup_scheduler(
         optimizer, config.scheduler, config.max_steps, config.optim.lr
     )
 
     # Data
-    print(f"Loading dataset")
-    dataset = setup_dataset(tokenizer, config.data)
+    print0(f"Loading dataset")
+    dataset = setup_dataset(
+        tokenizer, config.data, parallel_dims.non_data_parallel_size
+    )
     dataloader = setup_dataloader(dataset, config.data)
     dataiter = iter(dataloader)
 
-    # Gradient accumulation
-    grad_accum_steps = config.data.batch_size // config.data.micro_batch_size
-
     # loss function
     ce_loss = CrossEntropyLoss(reduction="none")
-    print(f"Starting training (max_steps={config.max_steps})")
+    print0(f"Starting training (max_steps={config.max_steps})")
     step = 0
 
     while step < config.max_steps:
         start_time = time.perf_counter()
-        batch_loss = 0.0
+        batch_loss = torch.tensor(0.0, device=device)
         optimizer.zero_grad()
 
         for _ in range(grad_accum_steps):
@@ -67,24 +94,30 @@ def train(config: SFTTrainerConfig):
 
             scaled_loss = loss / grad_accum_steps
             scaled_loss.backward()
-            batch_loss += scaled_loss.item()
+            # just accumulate the loss for logging.
+            batch_loss += scaled_loss.detach()
 
         # Does gradient clipping in place
-        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            model.parameters(), max_norm=config.optim.max_norm
+        ).full_tensor()
 
         # total_norm = sqrt(
         #     sum(x.grad**2 for x in model.parameters() if x.grad is not None)
         # )
         optimizer.step()
         scheduler.step()
+
+        # synchronize loss across all ranks, only for logging and monitoring
+        dist.all_reduce(batch_loss, op=dist.ReduceOp.AVG)
+
         step_time = time.perf_counter() - start_time
-        print(
-            f"step {step} | Loss {batch_loss:.4f} | Grad Norm {grad_norm:.4f} | Step Time {step_time:.2}"
+        print0(
+            f"rank: {world.rank} | step {step} | Loss {batch_loss.item():.4f} | Grad Norm {grad_norm:.4f} | Step Time {step_time:.2}s"
         )
         step += 1
 
-
-print("Training done")
+    print0("Training done")
 
 
 def main():

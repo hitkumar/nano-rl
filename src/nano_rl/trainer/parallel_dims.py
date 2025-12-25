@@ -1,6 +1,9 @@
 from dataclasses import dataclass
 from functools import cached_property
 
+from nano_rl.trainer.config import ModelConfig
+from nano_rl.trainer.world import get_world
+
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 
 
@@ -213,3 +216,26 @@ class ParallelDims:
         # Context Parallel requires seq_len divisible by 2 * CP degree
         # (when load balancing is enabled, which is the default)
         return self.tp * (self.cp * 2)
+
+
+def get_parallel_dims(config: ModelConfig, seq_len: int | None = None) -> ParallelDims:
+    parallel_dims = ParallelDims(
+        dp_replicate=config.dp_replicate,
+        dp_shard=-1,
+        cp=config.cp,
+        tp=config.tp,
+        pp=1,
+        ep=config.ep,
+        world_size=get_world().world_size,
+    )
+
+    # Validate sequence length against parallel dimensions requirements
+    if seq_len is not None and seq_len % parallel_dims.seq_len_divisor != 0:
+        raise ValueError(
+            f"Sequence length ({seq_len}) must be divisible by "
+            f"seq_len_divisor ({parallel_dims.seq_len_divisor}) for the given parallel dimensions. "
+            f"This requirement comes from context parallel (CP={config.cp}) and "
+            f"tensor parallel (TP={config.tp}) configurations."
+        )
+
+    return parallel_dims
