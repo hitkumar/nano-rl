@@ -15,7 +15,12 @@ from nano_rl.trainer.parallel_dims import ParallelDims
 from nano_rl.utils.logger import get_logger
 from torch.distributed.checkpoint.hf_storage import HuggingFaceStorageReader
 from torch.distributed.checkpoint.state_dict_loader import load as dcp_load
-from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
+from torch.distributed.fsdp import (
+    CPUOffloadPolicy,
+    fully_shard,
+    MixedPrecisionPolicy,
+    OffloadPolicy,
+)
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 from transformers.tokenization_utils import PreTrainedTokenizer
 
@@ -140,24 +145,52 @@ def setup_fsdp(
     # we need the 2D grid here as fsdp does all reduce for gradients across the dp_replicate dimension
     # and across dp_shard_cp dimension, we do traditional FSDP (all gather during forward and reduce scatter during backward)
     if config.dp_replicate > 1:
-        fsdp_mesh = parallel_dims.world_mesh["dp_replicate", "dp_shard_cp"]
+        hsdp_mesh = parallel_dims.world_mesh["dp_replicate", "dp_shard_cp"]
     else:
-        fsdp_mesh = parallel_dims.world_mesh["dp_shard_cp"]
+        hsdp_mesh = parallel_dims.world_mesh["dp_shard_cp"]
+
+    offload_policy: OffloadPolicy = (
+        CPUOffloadPolicy(pin_memory=True)
+        if config.fsdp_cpu_offload
+        else OffloadPolicy()
+    )
 
     # Nested FSDP: per-layer sharding limits peak memory to one layer's weights.
     # Outer model wrap shards remaining params (embeddings, lm_head, final norm).
     for transformer_block in model.model.layers:
         fully_shard(
             transformer_block,
-            mesh=fsdp_mesh,
+            mesh=hsdp_mesh,
             mp_policy=mp_policy,
+            offload_policy=offload_policy,
             reshard_after_forward=config.reshard_after_forward,
+        )
+
+    if hasattr(model, "config") and not model.config.tie_word_embeddings:
+        fully_shard(
+            model.model.embed_tokens,
+            mesh=hsdp_mesh,
+            mp_policy=mp_policy,
+            offload_policy=offload_policy,
+            reshard_after_forward=config.reshard_after_forward,
+        )
+        fully_shard(
+            [model.lm_head, model.model.norm],
+            mesh=hsdp_mesh,
+            mp_policy=mp_policy,
+            offload_policy=offload_policy,
+            reshard_after_forward=config.reshard_after_forward,
+        )
+    else:
+        get_logger().info(
+            "Model is tied word embeddings, not doing the last layer not resharding optimization"
         )
 
     fully_shard(
         model,
-        mesh=fsdp_mesh,
+        mesh=hsdp_mesh,
         mp_policy=mp_policy,
+        offload_policy=offload_policy,
         reshard_after_forward=config.reshard_after_forward,
     )
     return model
