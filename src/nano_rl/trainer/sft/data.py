@@ -332,9 +332,9 @@ def setup_dataloader(
     dataset: StatefulIterableDataset, config: DataConfigType
 ) -> StatefulDataLoader:
     packed = CatDataset(dataset, config.seq_len * config.micro_batch_size)
-    return StatefulDataLoader(
-        packed, batch_size=config.batch_size, collate_fn=cat_collate_fn
-    )
+    # Cat dataset creates a dataset of dim (seq_len * micro_batch_size).
+    # When we create stateful data loader, we always use batch_size 1 as we already have all the tokens.
+    return StatefulDataLoader(packed, batch_size=1, collate_fn=cat_collate_fn)
 
 
 if __name__ == "__main__":

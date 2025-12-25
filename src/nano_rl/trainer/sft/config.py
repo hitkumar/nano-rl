@@ -9,6 +9,7 @@ from nano_rl.trainer.config import (
     SchedulerConfigType,
     TokenizerConfig,
 )
+from nano_rl.utils.config import LogConfig
 from nano_rl.utils.pydantic_config import BaseConfig, BaseSettings
 from pydantic import BaseModel, Field, model_validator
 
@@ -129,6 +130,13 @@ class SFTTrainerConfig(BaseSettings):
             description="Timeout in seconds for torch distributed ops. Defaults to 600 seconds.",
         ),
     ] = 600
+    log: LogConfig = LogConfig()
+    output_dir: Annotated[
+        Path,
+        Field(
+            description="Directory to write outputs to. Will be populated with checkpoints and logs as subdirectories. Should be set to a persistent directory with enough disk space. This value should be distinct across experiments running on a single node. See the README for more details."
+        ),
+    ] = Path("outputs")
 
     @model_validator(mode="after")
     def auto_setup_tokenizer(self):

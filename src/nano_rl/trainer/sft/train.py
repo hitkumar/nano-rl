@@ -8,7 +8,7 @@ from datetime import timedelta
 import torch
 import torch.distributed as dist
 from liger_kernel.transformers.cross_entropy import LigerCrossEntropyLoss
-from nano_rl.trainer.model import setup_fsdp, setup_model, setup_tokenizer
+from nano_rl.trainer.model import setup_model, setup_tokenizer
 from nano_rl.trainer.optim import setup_optimizer
 
 from nano_rl.trainer.parallel_dims import get_parallel_dims
@@ -17,6 +17,7 @@ from nano_rl.trainer.sft.config import SFTTrainerConfig
 from nano_rl.trainer.sft.data import setup_dataloader, setup_dataset
 from nano_rl.trainer.utils import print0, setup_torch_distributed
 from nano_rl.trainer.world import get_world
+from nano_rl.utils.logger import setup_logger
 from nano_rl.utils.pydantic_config import parse_argv
 from torch.nn import CrossEntropyLoss
 
@@ -24,6 +25,14 @@ from torch.nn import CrossEntropyLoss
 def train(config: SFTTrainerConfig):
     # Setup distributed training
     world = get_world()
+    logger = setup_logger(
+        config.log.level,
+        log_file=(
+            config.output_dir / "logs" / "trainer" / f"rank_{world.rank}.log"
+            if config.log.file
+            else None
+        ),
+    )
     # gloo is only needed for cpu offload
     setup_torch_distributed(
         timeout=timedelta(seconds=config.dist_timeout_seconds),
@@ -34,19 +43,23 @@ def train(config: SFTTrainerConfig):
     torch.set_float32_matmul_precision("high")
 
     parallel_dims = get_parallel_dims(config.model, config.data.seq_len)
+    # batch_size is the unique number of samples we see before one optimizer step
+    # since non_data_parallel_size GPUs process the same batch, we need more micro batches if cp/tp is enabled.
     total_micro_batches = config.data.batch_size * parallel_dims.non_data_parallel_size
-    micro_batches_per_step = config.data.micro_batch_size * world.world_size
+    samples_per_fwd_pass = config.data.micro_batch_size * world.world_size
     assert (
-        total_micro_batches % micro_batches_per_step == 0
-    ), f"total_micro_batches ({total_micro_batches}) % micro_batches_per_step ({micro_batches_per_step}) != 0"
-    grad_accum_steps = total_micro_batches // micro_batches_per_step
+        total_micro_batches % samples_per_fwd_pass == 0
+    ), f"total_micro_batches ({total_micro_batches}) % samples_per_fwd_pass ({samples_per_fwd_pass}) != 0"
+    grad_accum_steps = total_micro_batches // samples_per_fwd_pass
+    # logger.info(f"grad_accum_steps: {grad_accum_steps}")
+    assert (
+        grad_accum_steps > 0
+    ), f"grad_accum_steps ({grad_accum_steps}) must be greater than 0"
 
     # Model & tokenizer
 
     print0(f"Loading model: {config.model.name}")
-    model = setup_model(config.model)
-    setup_fsdp(model, config.model, parallel_dims)
-    model.cuda()
+    model = setup_model(config.model, parallel_dims)
 
     print0(f"Loading tokenizer: {config.tokenizer.name}")
     tokenizer = setup_tokenizer(config.tokenizer)
@@ -68,7 +81,14 @@ def train(config: SFTTrainerConfig):
     dataiter = iter(dataloader)
 
     # loss function
-    ce_loss = CrossEntropyLoss(reduction="none")
+    match config.loss_impl:
+        case "liger":
+            ce_loss = LigerCrossEntropyLoss(reduction="none")
+        case "torch":
+            ce_loss = CrossEntropyLoss(reduction="none")
+        case _:
+            raise ValueError(f"Unknown loss implementation: {config.loss_impl}")
+
     print0(f"Starting training (max_steps={config.max_steps})")
     step = 0
 
@@ -87,10 +107,16 @@ def train(config: SFTTrainerConfig):
             # forward pass
             logits = model(input_ids=input_ids, position_ids=position_ids).logits
             B, L, V = logits.shape
+            # logger.info(
+            #     f"Batch input_ids shape: {input_ids.shape}, logits shape: {logits.shape}"
+            # )
 
             # Loss with masking
             loss = ce_loss(logits.view(-1, V), target_ids.view(-1)).view(B, L)
             loss = loss[loss_mask].mean()
+
+            # Delete logits before backward pass to avoid memory spike
+            del logits
 
             scaled_loss = loss / grad_accum_steps
             scaled_loss.backward()
