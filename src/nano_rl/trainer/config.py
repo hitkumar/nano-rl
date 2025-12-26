@@ -189,3 +189,40 @@ class ModelConfig(BaseConfig):
                 "CP is only supported with flash attention 2 or flash attention 3"
             )
         return self
+
+
+class WeightCheckpointConfig(BaseConfig):
+    """
+    Configures saving HF-compatible weight ckpts
+    """
+
+    save_sharded: Annotated[
+        bool, Field(description="Whether to save the weight ckpt in sharded format")
+    ] = True
+
+    save_format: Annotated[
+        Literal["safetensors", "torch"],
+        Field(description="The format to save the weight ckpt in"),
+    ] = "safetensors"
+
+
+class CheckpointConfig(BaseConfig):
+    """Configures checkpointing the full model, optimizer and training state for resuming training."""
+
+    interval: Annotated[
+        int | None,
+        Field(
+            ge=1,
+            description="Interval at which to save the training checkpoint. If None, will only checkpoint at the end of training.",
+        ),
+    ] = None
+
+    keep: Annotated[
+        int | None,
+        Field(
+            ge=1,
+            description="Keep at most this many recent step checkpoints on disk. If None, never clean old checkpoints.",
+        ),
+    ] = None
+
+    weights: WeightCheckpointConfig | None = WeightCheckpointConfig()

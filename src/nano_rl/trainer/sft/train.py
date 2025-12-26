@@ -8,6 +8,7 @@ from datetime import timedelta
 import torch
 import torch.distributed as dist
 from liger_kernel.transformers.cross_entropy import LigerCrossEntropyLoss
+from nano_rl.trainer.ckpt import WeightCheckpointManager
 from nano_rl.trainer.model import setup_model, setup_tokenizer
 from nano_rl.trainer.optim import setup_optimizer
 
@@ -41,6 +42,8 @@ def train(config: SFTTrainerConfig):
     # This will only work correctly if placed after setup_torch_distributed.
     device = torch.device("cuda")
     torch.set_float32_matmul_precision("high")
+
+    weight_manager = WeightCheckpointManager(config.output_dir, config=config.ckpt)
 
     parallel_dims = get_parallel_dims(config.model, config.data.seq_len)
     # batch_size is the unique number of samples we see before one optimizer step
@@ -141,8 +144,12 @@ def train(config: SFTTrainerConfig):
         print0(
             f"rank: {world.rank} | step {step} | Loss {batch_loss.item():.4f} | Grad Norm {grad_norm:.4f} | Step Time {step_time:.2}s"
         )
+        if config.ckpt.interval and step > 0 and step % config.ckpt.interval == 0:
+            weight_manager.save(step, model, tokenizer)
         step += 1
 
+    # save final checkpoint
+    weight_manager.save(step, model, tokenizer)
     print0("Training done")
 
 

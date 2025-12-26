@@ -1,0 +1,36 @@
+from pathlib import Path
+
+
+def get_ckpt_dir(output_dir: Path) -> Path:
+    return output_dir / "checkpoints"
+
+
+def get_weights_dir(output_dir: Path) -> Path:
+    return output_dir / "weights"
+
+
+def get_logs_dir(output_dir: Path) -> Path:
+    return output_dir / "logs"
+
+
+def get_evals_dir(output_dir: Path) -> Path:
+    return output_dir / "evals"
+
+
+def get_rollout_dir(output_dir: Path) -> Path:
+    return output_dir / "rollouts"
+
+
+def get_broadcasts_dir(output_dir: Path) -> Path:
+    return output_dir / "broadcasts"
+
+
+def get_step_path(path: Path, step: int) -> Path:
+    return path / f"step_{step}"
+
+
+def resolve_latest_ckpt_dir(ckpt_dir: Path) -> int | None:
+    step_dirs = list(ckpt_dir.glob("step_*"))
+    if step_dirs is None:
+        return None
+    return max([int(d.name.split("_")[1]) for d in step_dirs])
