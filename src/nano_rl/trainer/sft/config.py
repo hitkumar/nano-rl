@@ -106,13 +106,6 @@ class SFTTrainerConfig(BaseSettings):
         ConstantSchedulerConfig()
     )
 
-    output_dir: Annotated[
-        Path,
-        Field(
-            description="Directory to write outputs to. Will be populated with checkpoints and logs as subdirectories. Should be set to a persistent directory with enough disk space. This value should be distinct across experiments running on a single node."
-        ),
-    ] = Path("outputs")
-
     max_steps: Annotated[
         int | None,
         Field(

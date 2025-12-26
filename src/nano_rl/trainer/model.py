@@ -1,14 +1,11 @@
 import time
 from pathlib import Path
 
-from datasets.formatting.torch_formatter import torch
-
 import torch
 
 import torch.distributed as dist
 import torch.nn as nn
 from huggingface_hub import snapshot_download
-from liger_kernel.transformers.auto_model import AutoLigerKernelForCausalLM
 from liger_kernel.transformers import AutoLigerKernelForCausalLM
 from nano_rl.trainer.config import ModelConfig, TokenizerConfig
 from nano_rl.trainer.parallel_dims import ParallelDims

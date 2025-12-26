@@ -2,7 +2,7 @@ max_steps = 100
 loss_impl = "liger"
 
 [model]
-name = "PrimeIntellect/Qwen3-0.6B"
+name = "PrimeIntellect/Qwen3-8B"
 impl = "liger_kernel"
 
 [data]
