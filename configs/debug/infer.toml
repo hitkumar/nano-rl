@@ -1,0 +1,7 @@
+[model]
+name = "/home/htkumar/nano_rl/outputs/weights/step_100"
+max_model_len = 4096
+enforce_eager = true
+
+[parallel]
+tp = 2 # split model across GPUs.
