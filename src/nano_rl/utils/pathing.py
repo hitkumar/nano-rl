@@ -1,3 +1,5 @@
+import asyncio
+import time
 from pathlib import Path
 
 
@@ -34,3 +36,13 @@ def resolve_latest_ckpt_dir(ckpt_dir: Path) -> int | None:
     if step_dirs is None:
         return None
     return max([int(d.name.split("_")[1]) for d in step_dirs])
+
+
+def sync_wait_for_path(path: Path, interval: float = 1.0) -> None:
+    while not path.exists():
+        time.sleep(interval)
+
+
+async def wait_for_path(path: Path, interval: float = 1.0) -> None:
+    while not path.exists():
+        await asyncio.sleep(interval)

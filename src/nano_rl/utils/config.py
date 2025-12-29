@@ -34,3 +34,26 @@ class LogConfig(BaseConfig):
             description="Whether to log the first data sample to the logger.",
         ),
     ] = False
+
+
+class ModelConfig(BaseConfig):
+    """Configures the model."""
+
+    name: Annotated[str, Field(description="Name or path of the HF model to use.")] = (
+        "Qwen/Qwen3-0.6B"
+    )
+
+    trust_remote_code: Annotated[
+        bool,
+        Field(
+            description="Whether to trust remote code for tokenizer initialization.",
+        ),
+    ] = False
+
+
+class ClientConfig(BaseConfig):
+    # Not adding apikey for now as we assume local inference server
+    base_url: Annotated[str, Field(description="Base URL for inference server.")] = (
+        "http://localhost:8000/v1"
+    )
+    timeout: Annotated[float, Field(description="Request timeout.")] = 1200.0
