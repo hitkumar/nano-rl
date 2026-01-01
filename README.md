@@ -11,7 +11,10 @@ Validate that your uv env is setup correctly
 uv run python -c "import torch; print(f'torch {torch.__version__}, CUDA: {torch.cuda.is_available()}')"
 
 Kick off sft training on multiple gpus
-uv run torchrun --nproc-per-node=8 src/nano_rl/trainer/sft/train.py @ configs/debug/sft/train.toml
+uv run torchrun --nproc-per-node=8 -m nano_rl.trainer.sft.train @ configs/debug/sft/train.toml
+
+single GPU run
+uv run sft @ configs/debug/sft/train.toml
 
 Before running vllm commands, run this, LD library path set
 export LD_PRELOAD=/home/htkumar/nano_rl/.venv/lib/python3.12/site-packages/nvidia/cublas/lib/libcublas.so.12
@@ -20,6 +23,9 @@ Starting inference server
 
 CUDA_VISIBLE_DEVICES=0,1 uv run python -m nano_rl.inference.server @ configs/debug/infer.toml
 
+Or just this
+CUDA_VISIBLE_DEVICES=0,1 uv run inference  @ configs/debug/infer.toml
+
 Testing inference server
 
 curl http://localhost:8000/v1/chat/completions   -H "Content-Type: application/json"   -d '{
@@ -27,3 +33,8 @@ curl http://localhost:8000/v1/chat/completions   -H "Content-Type: application/j
     "messages": [{"role": "user", "content": "capital of US!"}],
     "max_tokens": 50
   }'
+
+***Tests***
+
+Running integration tests
+uv run pytest tests/integration/test_vf.py -v -s
