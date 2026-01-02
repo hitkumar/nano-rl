@@ -153,3 +153,8 @@ class OrchestratorConfig(BaseSettings):
         if self.batch_size % self.rollouts_per_example != 0:
             raise ValueError("batch_size must be divisible by rollouts_per_example")
         return self
+
+
+class AdvantageConfig(BaseConfig):
+    length_weighted_mean: bool = False
+    length_weighted_adv: bool = False

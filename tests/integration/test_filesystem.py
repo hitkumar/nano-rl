@@ -8,7 +8,6 @@ from nano_rl.transport import (
     setup_training_batch_sender,
     TrainingBatch,
     TrainingSample,
-    TransportConfigType,
 )
 
 
