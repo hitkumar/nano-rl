@@ -20,9 +20,9 @@ def state_to_training_sample(state: vf.State, advantage: float) -> TrainingSampl
     tokens = state["trajectory"][0]["tokens"]
     return TrainingSample(
         prompt_ids=tokens["prompt_ids"],
-        prompt_mask=tokens["prompt_mask"],
+        prompt_mask=[bool(i) for i in tokens["prompt_mask"]],
         completion_ids=tokens["completion_ids"],
-        completion_mask=tokens["completion_mask"],
+        completion_mask=[bool(i) for i in tokens["completion_mask"]],
         completion_logprobs=tokens["completion_logprobs"],
         advantage=advantage,
     )
