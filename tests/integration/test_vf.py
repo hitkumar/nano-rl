@@ -87,6 +87,8 @@ async def test_generate_rollout(client, env):
         example=example,
         sampling_args={"temperature": 0.2, "max_tokens": 256},
     )
+    tokens = state["trajectory"][0]["tokens"]
+    assert "token_ids" in tokens
     assert "trajectory" in state
     assert "reward" in state
     assert len(state["trajectory"]) == 1

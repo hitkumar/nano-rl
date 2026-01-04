@@ -21,10 +21,10 @@ export LD_PRELOAD=/home/htkumar/nano_rl/.venv/lib/python3.12/site-packages/nvidi
 
 Starting inference server
 
-CUDA_VISIBLE_DEVICES=0,1 uv run python -m nano_rl.inference.server @ configs/debug/infer.toml
+CUDA_VISIBLE_DEVICES=0,1 uv run python -m nano_rl.inference.server @ configs/debug/infer_tests.toml
 
 Or just this
-CUDA_VISIBLE_DEVICES=0,1 uv run inference  @ configs/debug/infer.toml
+CUDA_VISIBLE_DEVICES=0,1 uv run inference  @ configs/debug/infer_tests.toml
 
 Testing inference server
 
@@ -33,6 +33,10 @@ curl http://localhost:8000/v1/chat/completions   -H "Content-Type: application/j
     "messages": [{"role": "user", "content": "capital of US!"}],
     "max_tokens": 50
   }'
+
+Run orchestrator
+First start the inference server and then run this
+uv run orchestrator @ configs/debug/orch.toml
 
 ***Tests***
 

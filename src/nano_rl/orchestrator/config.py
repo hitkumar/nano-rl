@@ -7,7 +7,7 @@ from typing import Annotated, Any
 
 from nano_rl.transport.config import FileSystemTransportConfig, TransportConfigType
 
-from nano_rl.utils.config import ClientConfig, ModelConfig
+from nano_rl.utils.config import ClientConfig, LogConfig, ModelConfig
 from nano_rl.utils.pydantic_config import BaseConfig, BaseSettings
 from pydantic import Field, model_validator
 
@@ -74,6 +74,11 @@ class SamplingConfig(BaseConfig):
             description="Number of top tokens to consider. If -1, all tokens are considered. Defaults to None, which means we fall back to the inference server's default value.",
         ),
     ] = None
+
+
+class AdvantageConfig(BaseConfig):
+    length_weighted_mean: bool = False
+    length_weighted_adv: bool = False
 
 
 class EnvConfig(BaseConfig):
@@ -148,13 +153,14 @@ class OrchestratorConfig(BaseSettings):
         int | None, Field(description="Random seed for the orchestrator.")
     ] = 42
 
+    # The logging configuration
+    log: LogConfig = LogConfig()
+
+    # The advantage configuration
+    advantage: AdvantageConfig | None = AdvantageConfig()
+
     @model_validator(mode="after")
     def validate_batch_size(self):
         if self.batch_size % self.rollouts_per_example != 0:
             raise ValueError("batch_size must be divisible by rollouts_per_example")
         return self
-
-
-class AdvantageConfig(BaseConfig):
-    length_weighted_mean: bool = False
-    length_weighted_adv: bool = False

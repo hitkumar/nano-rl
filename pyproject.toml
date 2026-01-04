@@ -32,11 +32,13 @@ dependencies = [
     "vllm==0.12.0",
 
     "verifiers>=0.1.8",
+    "reverse-text>=0.1.4",
 ]
 
 [project.scripts]
 sft = "nano_rl.trainer.sft.train:main"
 inference = "nano_rl.inference.server:main"
+orchestrator = "nano_rl.orchestrator.orchestrator:main"
 
 [project.optional-dependencies]
 flash-attn = [
@@ -54,6 +56,8 @@ no-build-isolation-package = ["flash-attn"]
 
 [tool.uv.sources]
 torch = { index = "pytorch-cu128" }
+reverse-text = { index = "primeintellect" }
+
 
 [tool.uv.extra-build-dependencies]
 flash-attn = [{ requirement = "torch", match-runtime = true }]
@@ -66,6 +70,11 @@ flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
+
+[[tool.uv.index]]
+name = "primeintellect"
+url = "https://hub.primeintellect.ai/primeintellect/simple/"
+
 
 [build-system]
 requires = ["hatchling"]

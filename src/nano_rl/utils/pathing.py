@@ -32,8 +32,10 @@ def get_step_path(path: Path, step: int) -> Path:
 
 
 def resolve_latest_ckpt_dir(ckpt_dir: Path) -> int | None:
+    if not ckpt_dir.exists():
+        return None
     step_dirs = list(ckpt_dir.glob("step_*"))
-    if step_dirs is None:
+    if step_dirs is None or len(step_dirs) == 0:
         return None
     return max([int(d.name.split("_")[1]) for d in step_dirs])
 

@@ -3,7 +3,6 @@ Client util for orchestrtor -> inference communication
 """
 
 import asyncio
-import json
 from pathlib import Path
 
 import httpx

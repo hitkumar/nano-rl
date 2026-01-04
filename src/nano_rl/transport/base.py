@@ -3,7 +3,6 @@ from pathlib import Path
 
 import msgspec
 from nano_rl.transport.types import TrainingBatch
-from nano_rl.utils.logger import get_logger
 
 
 class TrainingBatchSender(ABC):
@@ -15,7 +14,8 @@ class TrainingBatchSender(ABC):
         self.output_dir = output_dir
 
     @abstractmethod
-    def send(self, batch: TrainingBatch) -> None:
+    def send(self, batch: TrainingBatch) -> str:
+        """Returns the path where the batch was saved"""
         pass
 
     def close(self) -> None:

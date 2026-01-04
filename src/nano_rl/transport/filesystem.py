@@ -19,7 +19,7 @@ class FileSystemTrainingBatchSender(TrainingBatchSender):
         super().__init__(output_dir)
         self.rollout_dir = get_rollout_dir(output_dir)
 
-    def send(self, batch: TrainingBatch) -> None:
+    def send(self, batch: TrainingBatch) -> str:
         """Send a batch by writing it to disk"""
         step_path = get_step_path(self.rollout_dir, batch.step)
         step_path.mkdir(parents=True, exist_ok=True)
@@ -31,6 +31,7 @@ class FileSystemTrainingBatchSender(TrainingBatchSender):
 
         # atomic rename so that receivers get consistent view of the data
         tmp_path.rename(step_path / BATCH_FILE_NAME)
+        return str(step_path / BATCH_FILE_NAME)
 
 
 class FileSystemTrainingBatchReceiver(TrainingBatchReceiver):
