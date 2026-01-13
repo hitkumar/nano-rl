@@ -1,15 +1,12 @@
 import shutil
-
 from dataclasses import dataclass
 from pathlib import Path
 
 from nano_rl.trainer.config import CheckpointConfig
 from nano_rl.trainer.weights import gather_weights_on_master, save_state_dict
-
 from nano_rl.trainer.world import get_world
 from nano_rl.utils.logger import get_logger
 from nano_rl.utils.pathing import get_step_path, get_weights_dir
-
 from torch import nn
 from transformers import PreTrainedTokenizerBase
 
@@ -53,6 +50,7 @@ class WeightCheckpointManager:
             self.saved_steps.append(step)
             self._maybe_clean()
             self.logger.info(f"Saved weights to {path}")
+            (path / "STABLE").touch()
 
     def _maybe_clean(self) -> None:
         if self.keep is None or not self.world.is_master:

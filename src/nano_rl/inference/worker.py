@@ -18,7 +18,7 @@ class WeightUpdateWorker(Worker):
         pass
 
     def update_weights(self, weight_path: str) -> None:
-        model = self.model_runner.model.runnable
+        model = getattr(self.model_runner.model, "runnable", self.model_runner.model)
         assert isinstance(model, Module)
 
         model_loader = get_model_loader(self.load_config)
@@ -29,7 +29,7 @@ class WeightUpdateWorker(Worker):
             revision=None,
             prefix="",
             fall_back_to_pt=getattr(model, "fall_back_to_pt_during_load", True),
-            allow_patters_override=getattr(model, "allow_patterns_overrides", None),
+            allow_patterns_overrides=getattr(model, "allow_patterns_overrides", None),
         )
         model.load_weights(model_loader._get_weights_iterator(source))
 

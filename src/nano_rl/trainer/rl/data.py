@@ -9,7 +9,7 @@ from typing import TypedDict
 import torch
 from jaxtyping import Bool, Float, Int
 
-from nano_rl.trainer.rl.config import DataLoaderConfig, FakeDataLoaderConfig
+from nano_rl.trainer.rl.config import FakeDataLoaderConfig
 from nano_rl.trainer.world import get_world
 from nano_rl.transport import setup_training_batch_receiver, TrainingBatch
 from nano_rl.transport.config import TransportConfigType
@@ -64,7 +64,7 @@ class FakeDataLoader:
 
         advantages = torch.randn(self.batch_size, self.seq_len, generator=generator)
         inference_logprobs = (
-            torch.randn(self.batch_size, self.seq_len, generator=generator) - 2.0
+            torch.randn(self.batch_size, self.seq_len, generator=generator) - 11.0
         )
 
         return TensorBatch(

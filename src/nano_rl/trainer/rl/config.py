@@ -14,7 +14,6 @@ from nano_rl.trainer.config import (
     SchedulerConfigType,
     TokenizerConfig,
 )
-
 from nano_rl.transport.config import FileSystemTransportConfig, TransportConfigType
 from nano_rl.utils.config import LogConfig
 from nano_rl.utils.pydantic_config import BaseConfig, BaseSettings
@@ -131,7 +130,7 @@ class RlTrainerConfig(BaseSettings):
         Field(
             description="Directory for outputs (checkpoints, weights, logs). Must match orchestrator's output_dir."
         ),
-    ] = Path("outputs")
+    ] = Path("outputs/run_r")
 
     # Maximum training steps
     # If None, trains indefinitely (useful for continuous RL)

@@ -22,3 +22,8 @@ def setup_torch_distributed(
 def print0(*args, **kwargs):
     if get_world().rank == 0:
         print(*args, **kwargs)
+
+
+def log0(*args, **kwargs):
+    if get_world().rank == 0:
+        get_logger().info(*args, **kwargs)

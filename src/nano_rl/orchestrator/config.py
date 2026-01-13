@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from nano_rl.transport.config import FileSystemTransportConfig, TransportConfigType
-
 from nano_rl.utils.config import ClientConfig, LogConfig, ModelConfig
 from nano_rl.utils.pydantic_config import BaseConfig, BaseSettings
 from pydantic import Field, model_validator

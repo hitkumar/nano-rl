@@ -23,7 +23,7 @@ from nano_rl.utils.pydantic_config import parse_argv
 from torch.nn import CrossEntropyLoss
 
 
-def train(config: SFTTrainerConfig):
+def train(config: SFTTrainerConfig) -> None:
     # Setup distributed training
     world = get_world()
     logger = setup_logger(

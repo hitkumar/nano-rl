@@ -39,6 +39,7 @@ dependencies = [
 sft = "nano_rl.trainer.sft.train:main"
 inference = "nano_rl.inference.server:main"
 orchestrator = "nano_rl.orchestrator.orchestrator:main"
+rl = "nano_rl.trainer.rl.train:main"
 
 [project.optional-dependencies]
 flash-attn = [

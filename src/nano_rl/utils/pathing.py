@@ -37,7 +37,11 @@ def resolve_latest_ckpt_dir(ckpt_dir: Path) -> int | None:
     step_dirs = list(ckpt_dir.glob("step_*"))
     if step_dirs is None or len(step_dirs) == 0:
         return None
-    return max([int(d.name.split("_")[1]) for d in step_dirs])
+    steps = sorted([int(d.name.split("_")[1]) for d in step_dirs], reverse=True)
+    for step in steps:
+        if (ckpt_dir / f"step_{step}" / "STABLE").exists():
+            return step
+    return None
 
 
 def sync_wait_for_path(path: Path, interval: float = 1.0) -> None:

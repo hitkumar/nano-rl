@@ -26,7 +26,7 @@ CUDA_VISIBLE_DEVICES=0,1 uv run python -m nano_rl.inference.server @ configs/deb
 Or just this
 CUDA_VISIBLE_DEVICES=0,1 uv run inference  @ configs/debug/infer_tests.toml
 
-Testing inference server
+***Testing inference server***
 
 curl http://localhost:8000/v1/chat/completions   -H "Content-Type: application/json"   -d '{
     "model": "/home/htkumar/nano_rl/outputs/weights/step_100",
@@ -34,11 +34,16 @@ curl http://localhost:8000/v1/chat/completions   -H "Content-Type: application/j
     "max_tokens": 50
   }'
 
-Run orchestrator
+***Run orchestrator***
 First start the inference server and then run this
 uv run orchestrator @ configs/debug/orch.toml
 
-***Tests***
+***Running RL***
+Start inference server and then start orchestrator which writes the training batches
 
+Then run this to start rl training
+CUDA_VISIBLE_DEVICES=1,2,3,4,5,6,7 uv run torchrun --nproc_per_node=7 -m nano_rl.trainer.rl.train @ configs/debug/rl.toml
+
+***Tests***
 Running integration tests
 uv run pytest tests/integration/test_vf.py -v -s

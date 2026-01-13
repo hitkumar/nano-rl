@@ -1,0 +1,7 @@
+max_steps = 50
+
+[model]
+seq_len = 1024
+
+[ckpt]
+interval = 5
