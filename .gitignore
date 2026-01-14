@@ -14,3 +14,4 @@ __pycache__/
 
 outputs/
 .claude/
+.pytest_cache/

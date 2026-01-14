@@ -4,7 +4,6 @@ import time
 import pytest
 import verifiers as vf
 from nano_rl.orchestrator.utils import set_semaphore
-
 from nano_rl.utils.client import setup_client
 from nano_rl.utils.vf import generate_group, generate_rollout
 from openai import AsyncOpenAI
@@ -23,7 +22,7 @@ def inference_server():
             "run",
             "inference",
             "@",
-            "configs/debug/infer_tests.toml",
+            "configs/debug/infer.toml",
         ]
     )
 

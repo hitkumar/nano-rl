@@ -21,10 +21,10 @@ export LD_PRELOAD=/home/htkumar/nano_rl/.venv/lib/python3.12/site-packages/nvidi
 
 Starting inference server
 
-CUDA_VISIBLE_DEVICES=0,1 uv run python -m nano_rl.inference.server @ configs/debug/infer_tests.toml
+CUDA_VISIBLE_DEVICES=0,1 uv run python -m nano_rl.inference.server @ configs/debug/infer.toml
 
 Or just this
-CUDA_VISIBLE_DEVICES=0,1 uv run inference  @ configs/debug/infer_tests.toml
+CUDA_VISIBLE_DEVICES=0,1 uv run inference  @ configs/debug/infer.toml
 
 ***Testing inference server***
 

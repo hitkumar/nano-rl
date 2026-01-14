@@ -8,7 +8,6 @@ import time
 from pathlib import Path
 
 import pytest
-
 from nano_rl.orchestrator.config import (
     AdvantageConfig,
     EnvConfig,
@@ -34,7 +33,7 @@ def inference_server():
             "run",
             "inference",
             "@",
-            "configs/debug/infer_tests.toml",
+            "configs/debug/infer.toml",
         ]
     )
 
