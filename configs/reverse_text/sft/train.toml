@@ -2,7 +2,8 @@ max_steps = 100
 loss_impl = "liger"
 
 [model]
-name = "PrimeIntellect/Qwen3-8B"
+# output weights are saved at outputs/weights/step_100
+name = "PrimeIntellect/Qwen3-0.6B"
 impl = "liger_kernel"
 
 [data]

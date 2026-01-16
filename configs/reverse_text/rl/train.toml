@@ -1,0 +1,13 @@
+max_steps = 20
+
+[model]
+# SFT model
+name = "outputs/weights/step_100"
+# same as what orchestrator uses
+seq_len = 2048
+
+[optim]
+lr = 3e-6
+
+[ckpt]
+interval = 1

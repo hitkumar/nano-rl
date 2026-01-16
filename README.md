@@ -47,3 +47,7 @@ CUDA_VISIBLE_DEVICES=1,2,3,4,5,6,7 uv run torchrun --nproc_per_node=7 -m nano_rl
 ***Tests***
 Running integration tests
 uv run pytest tests/integration/test_vf.py -v -s
+
+***Evals***
+For one off evals of a vf environment, start the inference server and then run this
+uv run vf-eval reverse-text -m Qwen/Qwen3-0.6B -b http://localhost:8000/v1 -n 20 --max-tokens 1024

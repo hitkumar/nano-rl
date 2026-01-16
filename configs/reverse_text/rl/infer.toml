@@ -1,0 +1,3 @@
+[model]
+# SFT model
+name = "outputs/weights/step_100"
