@@ -16,7 +16,7 @@ from nano_rl.trainer.parallel_dims import get_parallel_dims
 from nano_rl.trainer.scheduler import setup_scheduler
 from nano_rl.trainer.sft.config import SFTTrainerConfig
 from nano_rl.trainer.sft.data import setup_dataloader, setup_dataset
-from nano_rl.trainer.utils import print0, setup_torch_distributed
+from nano_rl.trainer.utils import log0, setup_torch_distributed
 from nano_rl.trainer.world import get_world
 from nano_rl.utils.logger import setup_logger
 from nano_rl.utils.pydantic_config import parse_argv
@@ -61,10 +61,10 @@ def train(config: SFTTrainerConfig) -> None:
 
     # Model & tokenizer
 
-    print0(f"Loading model: {config.model.name}")
+    log0(f"Loading model: {config.model.name}")
     model = setup_model(config.model, parallel_dims)
 
-    print0(f"Loading tokenizer: {config.tokenizer.name}")
+    log0(f"Loading tokenizer: {config.tokenizer.name}")
     tokenizer = setup_tokenizer(config.tokenizer)
 
     # Optimizer & scheduler
@@ -76,7 +76,7 @@ def train(config: SFTTrainerConfig) -> None:
     )
 
     # Data
-    print0(f"Loading dataset")
+    log0(f"Loading dataset")
     dataset = setup_dataset(
         tokenizer, config.data, parallel_dims.non_data_parallel_size
     )
@@ -92,7 +92,7 @@ def train(config: SFTTrainerConfig) -> None:
         case _:
             raise ValueError(f"Unknown loss implementation: {config.loss_impl}")
 
-    print0(f"Starting training (max_steps={config.max_steps})")
+    log0(f"Starting training (max_steps={config.max_steps})")
     step = 0
 
     while step < config.max_steps:
@@ -141,7 +141,7 @@ def train(config: SFTTrainerConfig) -> None:
         dist.all_reduce(batch_loss, op=dist.ReduceOp.AVG)
 
         step_time = time.perf_counter() - start_time
-        print0(
+        log0(
             f"rank: {world.rank} | step {step} | Loss {batch_loss.item():.4f} | Grad Norm {grad_norm:.4f} | Step Time {step_time:.2}s"
         )
         if config.ckpt.interval and step > 0 and step % config.ckpt.interval == 0:
@@ -150,7 +150,7 @@ def train(config: SFTTrainerConfig) -> None:
 
     # save final checkpoint
     weight_manager.save(step, model, tokenizer)
-    print0("Training done")
+    log0("Training done")
 
 
 def main():
