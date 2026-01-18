@@ -3,7 +3,7 @@ RL Trainer config
 """
 
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypeAlias
 
 from nano_rl.trainer.config import (
     AdamWConfig,
@@ -17,7 +17,26 @@ from nano_rl.trainer.config import (
 from nano_rl.transport.config import FileSystemTransportConfig, TransportConfigType
 from nano_rl.utils.config import LogConfig
 from nano_rl.utils.pydantic_config import BaseConfig, BaseSettings
-from pydantic import Field, model_validator
+from pydantic import BaseModel, Field, model_validator
+
+
+class FileSystemWeightBroadcastConfig(BaseModel):
+    """
+    Configures weight broadcast via shared filesystem
+    We retain max_async_level + 1 number of broadcast weights
+    """
+
+    type: Literal["filesystem"] = "filesystem"
+    save_sharded: Annotated[
+        bool, Field(description="Whether to save broadcast weights in sharded format.")
+    ] = True
+    save_format: Annotated[
+        Literal["safetensors", "torch"],
+        Field(description="The format to save the broadcast weight ckpt in"),
+    ] = "safetensors"
+
+
+WeightBroadcastConfigType: TypeAlias = FileSystemWeightBroadcastConfig
 
 
 class LossConfig(BaseConfig):
@@ -114,6 +133,11 @@ class RlTrainerConfig(BaseSettings):
     # ckpt config
     ckpt: CheckpointConfig = CheckpointConfig()
 
+    # Weight broadcast config
+    weight_broadcast: Annotated[
+        WeightBroadcastConfigType, Field(discriminator="type")
+    ] = FileSystemWeightBroadcastConfig()
+
     # Transport mechanism for receiving rollouts from orchestrator
     # Currently only filesystem transport is supported
     rollout_transport: Annotated[TransportConfigType, Field(discriminator="type")] = (
@@ -138,6 +162,15 @@ class RlTrainerConfig(BaseSettings):
         int | None,
         Field(description="Maximum training steps. If None, runs indefinitely."),
     ] = None
+
+    # this is also present in the orchestrator config
+    max_async_level: Annotated[
+        int,
+        Field(
+            ge=0,
+            description="Maximum number of steps that inference can be ahead of training. Determines how 'off-policy' the inference engines can be. Higher values yield better throughput through async execution, but may yield lower performance. If 0, will be fully synchronous.",
+        ),
+    ] = 1
 
     dist_timeout_seconds: Annotated[
         int,

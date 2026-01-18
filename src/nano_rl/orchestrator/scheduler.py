@@ -8,15 +8,14 @@ from typing import Any
 
 import verifiers as vf
 from httpx import AsyncClient
-
 from nano_rl.orchestrator.config import OrchestratorConfig
 from nano_rl.orchestrator.utils import get_sampling_args
 from nano_rl.transport import TrainingBatchSender  # Trainer communication
-from nano_rl.utils.client import setup_admin_client, update_weights  # Weight updates
+from nano_rl.utils.client import update_weights  # Weight updates
 from nano_rl.utils.logger import get_logger
 from nano_rl.utils.pathing import (
+    get_broadcasts_dir,  # output_dir / "broadcasts"
     get_step_path,  # weights_dir / "step_{n}"
-    get_weights_dir,  # weight_dir
     resolve_latest_ckpt_dir,  # Find newest ckpt number
 )
 from nano_rl.utils.vf import generate_group  # Rollout generation
@@ -47,7 +46,8 @@ class Scheduler:
         # used by verifiers
         self.sampling_args = get_sampling_args(config.sampling)
 
-        self.weights_dir = get_weights_dir(config.output_dir)
+        # Orchestrator reads from broadcasts directory to know about new checkpoints
+        self.broadcasts_dir = get_broadcasts_dir(config.output_dir)
 
         # Keep track of current state
         self.current_weight_step = (
@@ -71,10 +71,11 @@ class Scheduler:
         return self.step - max(self.current_weight_step, 0)
 
     async def _update_policy(self) -> None:
-        """Checks for new weights and updates if ready"""
-        latest_step = resolve_latest_ckpt_dir(self.weights_dir)
+        """Checks for new broadcast weights and updates if ready"""
+
+        latest_step = resolve_latest_ckpt_dir(self.broadcasts_dir)
         if latest_step is not None and latest_step > self.current_weight_step:
-            weights_path = get_step_path(self.weights_dir, latest_step)
+            weights_path = get_step_path(self.broadcasts_dir, latest_step)
             await update_weights(self.admin_client, weights_path)
             self.current_weight_step = latest_step
             self.logger.info(f"Updated to weights step: {latest_step}")

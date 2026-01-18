@@ -1,11 +1,12 @@
 batch_size = 16
 rollouts_per_example = 16
 seq_len = 2048
-max_steps = 20
+max_steps = 100
+max_async_level = 5
 
 [model]
 # SFT model
-name = "outputs/weights/step_100"
+name = "outputs/sft/weights/step_100"
 
 [sampling]
 max_tokens = 128

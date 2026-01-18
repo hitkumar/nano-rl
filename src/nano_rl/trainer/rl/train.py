@@ -9,6 +9,7 @@ from nano_rl.trainer.ckpt import WeightCheckpointManager
 from nano_rl.trainer.model import setup_model, setup_tokenizer
 from nano_rl.trainer.optim import setup_optimizer
 from nano_rl.trainer.parallel_dims import get_parallel_dims
+from nano_rl.trainer.rl.broadcast import setup_weight_broadcast
 from nano_rl.trainer.rl.config import RlTrainerConfig
 from nano_rl.trainer.rl.data import DataLoader, FakeDataLoader
 from nano_rl.trainer.rl.loss import (
@@ -45,6 +46,11 @@ def train(config: RlTrainerConfig) -> None:
     torch.set_float32_matmul_precision("high")
 
     weight_manager = WeightCheckpointManager(config.output_dir, config=config.ckpt)
+
+    # broadcasts weights for inference server.
+    weight_broadcaster = setup_weight_broadcast(
+        config.output_dir, config.weight_broadcast, config.max_async_level
+    )
 
     parallel_dims = get_parallel_dims(config.model, config.model.seq_len)
     log0(f"Loading model {config.model.name}")
@@ -140,8 +146,11 @@ def train(config: RlTrainerConfig) -> None:
             f"Time {step_time:.2f}s"
         )
 
+        # broadcast weights to inference server
+        weight_broadcaster.broadcast_weights(model, step)
+
         # save weights at regular intervals
-        if config.ckpt.interval and step % config.ckpt.interval == 0:
+        if step > 0 and config.ckpt.interval and step % config.ckpt.interval == 0:
             weight_manager.save(step, model, tokenizer)
 
         step += 1

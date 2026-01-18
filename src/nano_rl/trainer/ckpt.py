@@ -37,10 +37,10 @@ class WeightCheckpointManager:
         self.saved_steps: list[int] = []
 
     def save(self, step: int, model: nn.Module, tokenizer: PreTrainedTokenizerBase):
-        path = get_step_path(self.weights_dir, step)
         state_dict = gather_weights_on_master(model, self.world.is_master)
 
         if self.world.is_master:
+            path = get_step_path(self.weights_dir, step)
             save_state_dict(
                 state_dict, path, self.weights.save_format, self.weights.save_sharded
             )
