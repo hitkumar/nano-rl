@@ -1,4 +1,4 @@
-""" Main orchestrator loop """
+"""Main orchestrator loop"""
 
 import asyncio
 import random
@@ -100,9 +100,11 @@ async def orchestrate(config: OrchestratorConfig) -> None:
                 )
                 continue
 
-            # TODO: understand why temperature is needed here.
             batch = TrainingBatch(
-                examples=samples, temperature=config.sampling.temperature, step=step
+                examples=samples,
+                temperature=config.sampling.temperature,
+                step=step,
+                ckpt_step=scheduler.current_weight_step,
             )
 
             # writes batch to a file from where trainer can read it

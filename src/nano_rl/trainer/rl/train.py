@@ -87,6 +87,7 @@ def train(config: RlTrainerConfig) -> None:
         # block until orchestrator writes a batch to filesystem
         dataloader.wait_for_batch()
         batch = dataloader.get_batch()
+        off_policy_step = step - batch["ckpt_step"]
 
         # move batch to device
         input_ids = batch["input_ids"].to(device)
@@ -143,7 +144,8 @@ def train(config: RlTrainerConfig) -> None:
             f"KL {loss_diagnostics['mismatch_kl'].item():.4f} | "
             f"Masked {loss_diagnostics['tokens_masked'].item():.2%} | "
             f"Grad Norm {grad_norm:.4f} | "
-            f"Time {step_time:.2f}s"
+            f"Time {step_time:.2f}s | "
+            f"Off Policy {off_policy_step}"
         )
 
         # broadcast weights to inference server

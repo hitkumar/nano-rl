@@ -18,3 +18,4 @@ class TrainingBatch(msgspec.Struct, array_like=True, gc=False, omit_defaults=Tru
     examples: list[TrainingSample]
     temperature: float
     step: int
+    ckpt_step: int  # Policy step that generated this batch, used to measure how off policy our training is

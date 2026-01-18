@@ -64,6 +64,7 @@ class TestDataLoaderGetBatch:
             ],
             temperature=1.0,
             step=0,
+            ckpt_step=0,
         )
         mock_receiver.receive.return_value = training_batch
 
@@ -95,6 +96,7 @@ class TestDataLoaderGetBatch:
             ],
             temperature=1.0,
             step=0,
+            ckpt_step=0,
         )
         mock_receiver.receive.return_value = training_batch
 
@@ -118,6 +120,7 @@ class TestDataLoaderGetBatch:
             ],
             temperature=1.0,
             step=0,
+            ckpt_step=0,
         )
         mock_receiver.receive.return_value = training_batch
 
@@ -125,3 +128,27 @@ class TestDataLoaderGetBatch:
 
         # Advantages should be 0.0 for completion tokens
         assert batch["advantages"][0, 2:4].tolist() == [0.0, 0.0]
+
+    def test_get_batch_includes_ckpt_step(self, data_loader, mock_receiver):
+        """Test that ckpt_step is correctly passed through to TensorBatch"""
+        training_batch = TrainingBatch(
+            examples=[
+                TrainingSample(
+                    prompt_ids=[1, 2],
+                    prompt_mask=[True, True],
+                    completion_ids=[3, 4],
+                    completion_mask=[True, True],
+                    completion_logprobs=[-0.5, -0.3],
+                    advantage=1.0,
+                )
+            ],
+            temperature=1.0,
+            step=5,
+            ckpt_step=3,
+        )
+        mock_receiver.receive.return_value = training_batch
+
+        batch = data_loader.get_batch()
+
+        # ckpt_step should be passed through
+        assert batch["ckpt_step"] == 3

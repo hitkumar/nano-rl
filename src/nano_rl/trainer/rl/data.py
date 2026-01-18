@@ -8,13 +8,11 @@ from typing import TypedDict
 
 import torch
 from jaxtyping import Bool, Float, Int
-
 from nano_rl.trainer.rl.config import FakeDataLoaderConfig
 from nano_rl.trainer.world import get_world
 from nano_rl.transport import setup_training_batch_receiver, TrainingBatch
 from nano_rl.transport.config import TransportConfigType
 from torch import Tensor
-
 from transformers.tokenization_utils import PreTrainedTokenizer
 
 
@@ -33,6 +31,9 @@ class TensorBatch(TypedDict):
 
     # Sampling temperature used during rollout generation by vllm
     temperature: float
+
+    # policy step used to generate this batch, used to measure how off policy our training is
+    ckpt_step: int
 
 
 class FakeDataLoader:
@@ -74,6 +75,7 @@ class FakeDataLoader:
             advantages=advantages,
             inference_logprobs=inference_logprobs,
             temperature=1.0,
+            ckpt_step=self.step,
         )
 
 
@@ -173,4 +175,5 @@ class DataLoader:
             advantages=advantages,
             inference_logprobs=inference_logprobs,
             temperature=batch.temperature,
+            ckpt_step=batch.ckpt_step,
         )

@@ -21,7 +21,7 @@ from nano_rl.utils.config import ClientConfig
 
 pytestmark = [pytest.mark.gpu, pytest.mark.slow]
 
-INFERENCE_STARTUP_TIMEOUT = 300  # 5 minutes to load model
+INFERENCE_STARTUP_TIMEOUT = 60  # 1 minute to load model
 
 
 @pytest.fixture(scope="module")
@@ -75,6 +75,9 @@ async def test_orchestrator_produces_valid_training_samples(
 
     receiver = setup_training_batch_receiver(tmp_path, current_step=0)
     batch = receiver.receive()
+
+    # Check ckpt_step is present and valid (should be -1 before any weights are checkpointed)
+    assert batch.ckpt_step == -1
 
     for sample in batch.examples:
         # Check all required fields exist and have correct types

@@ -23,11 +23,12 @@ def make_sample() -> TrainingSample:
     )
 
 
-def make_batch(step: int) -> TrainingBatch:
+def make_batch(step: int, ckpt_step: int = 0) -> TrainingBatch:
     return TrainingBatch(
         examples=[make_sample(), make_sample()],
         temperature=0.7,
         step=step,
+        ckpt_step=ckpt_step,
     )
 
 
@@ -35,7 +36,7 @@ class TestFileSystemTransport:
     def test_send_receive_roundtrip(self, tmp_path: Path):
         sender = setup_training_batch_sender(tmp_path)
         receiver = setup_training_batch_receiver(tmp_path, current_step=0)
-        batch = make_batch(step=0)
+        batch = make_batch(step=0, ckpt_step=0)
         assert not receiver.can_receive()
 
         sender.send(batch)
@@ -43,8 +44,20 @@ class TestFileSystemTransport:
         received = receiver.receive()
 
         assert received.step == batch.step
+        assert received.ckpt_step == batch.ckpt_step
         assert received.temperature == batch.temperature
         assert len(received.examples) == len(batch.examples)
         assert received.examples[0].prompt_ids == batch.examples[0].prompt_ids
         assert received.examples[0].advantage == batch.examples[0].advantage
         assert receiver.current_step == batch.step + 1
+
+    def test_ckpt_step_preserved(self, tmp_path: Path):
+        """Test that ckpt_step is correctly preserved through send/receive"""
+        sender = setup_training_batch_sender(tmp_path)
+        receiver = setup_training_batch_receiver(tmp_path, current_step=0)
+        batch = make_batch(step=0, ckpt_step=5)
+
+        sender.send(batch)
+        received = receiver.receive()
+
+        assert received.ckpt_step == 5
