@@ -61,6 +61,7 @@ def train(config: RlTrainerConfig) -> None:
 
     parallel_dims = get_parallel_dims(config.model, config.model.seq_len)
     log0(f"Loading model {config.model.name}")
+    log0(f"Parallel dimensions: {parallel_dims}")
     model = setup_model(config.model, parallel_dims)
 
     log0(f"Loading tokenizer: {config.tokenizer.name}")
@@ -86,14 +87,24 @@ def train(config: RlTrainerConfig) -> None:
         )
 
     log0("starting training loop")
+    log0(f"Config seq_len: {config.model.seq_len}")
+
+    # Initialize perf counter once with config seq_len
+    perf_counter = get_perf_counter(model, config.model.seq_len)
+    log0(f"FLOPs per token: {perf_counter.num_flop_per_token:.2e}")
+    log0(f"GPU peak FLOPs: {perf_counter.gpu_peak_flops:.2e}")
+
     step = 0
     max_steps = config.max_steps or float("inf")
     while step < max_steps:
-        step_start_time = time.perf_counter()
+        wait_start = time.perf_counter()
 
         # block until orchestrator writes a batch to filesystem
         dataloader.wait_for_batch()
         batch = dataloader.get_batch()
+        wait_time = time.perf_counter() - wait_start
+
+        compute_start = time.perf_counter()
         off_policy_step = step - batch["ckpt_step"]
 
         # move batch to device
@@ -144,17 +155,33 @@ def train(config: RlTrainerConfig) -> None:
         # TODO: currently a no-op as all shards operate on the same batch, fix this.
         dist.all_reduce(loss, op=dist.ReduceOp.AVG)
 
+        compute_time = time.perf_counter() - compute_start
+
         batch_size = input_ids.shape[0]
         seq_len = input_ids.shape[1]
         # All GPUs process the same batch, but it is processed on each GPU, so we multiply by dp_degree
         num_tokens = batch_size * seq_len * parallel_dims.dp_degree
-        perf_counter = get_perf_counter(model, seq_len)
+
+        # Log batch dimensions on first step for debugging
+        if step == 0:
+            log0(f"Batch dims: batch_size={batch_size}, seq_len={seq_len}, num_tokens={num_tokens}")
+            log0(f"Expected tokens with config: {batch_size} * {config.model.seq_len} * {parallel_dims.dp_degree} = {batch_size * config.model.seq_len * parallel_dims.dp_degree}")
+
         perf_counter.count_tokens(num_tokens)
         throughput = perf_counter.get_tokens_per_sec() or 0
         mfu = perf_counter.get_mfu() or 0
         peak_memory = torch.cuda.max_memory_allocated() / 1024**3  # convert to GiB
 
-        step_time = time.perf_counter() - step_start_time
+        step_time = wait_time + compute_time
+
+        log0(
+            f"Step {step} | "
+            f"Loss {loss.item():.4f} | "
+            f"Wait {wait_time:.2f}s | "
+            f"Compute {compute_time:.2f}s | "
+            f"MFU {mfu:.2f}% | "
+            f"Throughput {throughput:.0f} tok/s"
+        )
 
         monitor.log(
             {
@@ -171,12 +198,17 @@ def train(config: RlTrainerConfig) -> None:
                 "perf/peak_memory": peak_memory,
                 # Time metrics
                 "time/step": step_time,
+                "time/wait": wait_time,
+                "time/compute": compute_time,
             },
             step=step,
         )
 
         # broadcast weights to inference server
+        broadcast_start = time.perf_counter()
         weight_broadcaster.broadcast_weights(model, step)
+        broadcast_time = time.perf_counter() - broadcast_start
+        monitor.log({"time/broadcast": broadcast_time}, step=step)
 
         # save weights at regular intervals
         if step > 0 and config.ckpt.interval and step % config.ckpt.interval == 0:
