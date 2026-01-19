@@ -1,4 +1,4 @@
-max_steps = 50
+max_steps = 20
 
 [model]
 seq_len = 1024

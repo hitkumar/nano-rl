@@ -210,6 +210,12 @@ class ParallelDims:
     def non_data_parallel_size(self):
         return self.cp * self.tp * self.pp
 
+    def __repr__(self):
+        return (
+            f"ParallelDims(dp={self.dp_degree}, dp_replicate={self.dp_replicate}, "
+            f"dp_shard={self.dp_shard}, cp={self.cp}, tp={self.tp}, pp={self.pp}, ep={self.ep})"
+        )
+
     @cached_property
     def seq_len_divisor(self):
         # Sequence Parallel requires seq_len divisible by TP degree

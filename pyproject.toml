@@ -33,6 +33,8 @@ dependencies = [
 
     "verifiers>=0.1.8",
     "reverse-text>=0.1.4",
+    # Formatting tables
+    "rich>=14.0.0",
 ]
 
 [project.scripts]

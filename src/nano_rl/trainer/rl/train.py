@@ -9,6 +9,7 @@ from nano_rl.trainer.ckpt import WeightCheckpointManager
 from nano_rl.trainer.model import setup_model, setup_tokenizer
 from nano_rl.trainer.optim import setup_optimizer
 from nano_rl.trainer.parallel_dims import get_parallel_dims
+from nano_rl.trainer.perf import get_perf_counter
 from nano_rl.trainer.rl.broadcast import setup_weight_broadcast
 from nano_rl.trainer.rl.config import RlTrainerConfig
 from nano_rl.trainer.rl.data import DataLoader, FakeDataLoader
@@ -19,10 +20,13 @@ from nano_rl.trainer.rl.loss import (
     shift_logits,
 )
 from nano_rl.trainer.scheduler import setup_scheduler
-from nano_rl.trainer.utils import log0, setup_torch_distributed
+from nano_rl.trainer.utils import log0, print_benchmark, setup_torch_distributed
 from nano_rl.trainer.world import get_world
 from nano_rl.utils.logger import setup_logger
+from nano_rl.utils.monitor import setup_monitor
 from nano_rl.utils.pydantic_config import parse_argv
+from nano_rl.utils.utils import to_col_format
+from torch.nn import CrossEntropyLoss
 
 
 def train(config: RlTrainerConfig) -> None:
@@ -44,6 +48,9 @@ def train(config: RlTrainerConfig) -> None:
     # This will only work correctly if placed after setup_torch_distributed.
     device = torch.device("cuda")
     torch.set_float32_matmul_precision("high")
+
+    # metrics monitor
+    monitor = setup_monitor(output_dir=config.output_dir)
 
     weight_manager = WeightCheckpointManager(config.output_dir, config=config.ckpt)
 
@@ -131,21 +138,41 @@ def train(config: RlTrainerConfig) -> None:
         # update weights
         optimizer.step()
         scheduler.step()
+        current_lr = optimizer.param_groups[0]["lr"]
 
         # synchronize loss across all ranks, only for logging and monitoring
         # TODO: currently a no-op as all shards operate on the same batch, fix this.
         dist.all_reduce(loss, op=dist.ReduceOp.AVG)
+
+        batch_size = input_ids.shape[0]
+        seq_len = input_ids.shape[1]
+        # All GPUs process the same batch, but it is processed on each GPU, so we multiply by dp_degree
+        num_tokens = batch_size * seq_len * parallel_dims.dp_degree
+        perf_counter = get_perf_counter(model, seq_len)
+        perf_counter.count_tokens(num_tokens)
+        throughput = perf_counter.get_tokens_per_sec() or 0
+        mfu = perf_counter.get_mfu() or 0
+        peak_memory = torch.cuda.max_memory_allocated() / 1024**3  # convert to GiB
+
         step_time = time.perf_counter() - step_start_time
 
-        log0(
-            f"Step {step} | "
-            f"Loss {loss.item():.4f} | "
-            f"Entropy {mean_entropy.item():.4f} | "
-            f"KL {loss_diagnostics['mismatch_kl'].item():.4f} | "
-            f"Masked {loss_diagnostics['tokens_masked'].item():.2%} | "
-            f"Grad Norm {grad_norm:.4f} | "
-            f"Time {step_time:.2f}s | "
-            f"Off Policy {off_policy_step}"
+        monitor.log(
+            {
+                "loss/mean": loss.item(),
+                "loss/entropy": mean_entropy.item(),
+                "loss/mismatch_kl": loss_diagnostics["mismatch_kl"].item(),
+                "loss/tokens_masked": loss_diagnostics["tokens_masked"].item(),
+                # Optimizer metrics
+                "optim/grad_norm": grad_norm.item(),
+                "optim/lr": current_lr,
+                # performance metrics
+                "perf/throughput": throughput,
+                "perf/mfu": mfu,
+                "perf/peak_memory": peak_memory,
+                # Time metrics
+                "time/step": step_time,
+            },
+            step=step,
         )
 
         # broadcast weights to inference server
@@ -159,6 +186,11 @@ def train(config: RlTrainerConfig) -> None:
 
     # save final checkpoint
     weight_manager.save(step, model, tokenizer)
+    if world.is_master:
+        history = to_col_format(monitor.history)
+        print_benchmark(history)
+        monitor.close()
+
     log0("Training done")
 
 

@@ -11,15 +11,17 @@ from liger_kernel.transformers.cross_entropy import LigerCrossEntropyLoss
 from nano_rl.trainer.ckpt import WeightCheckpointManager
 from nano_rl.trainer.model import setup_model, setup_tokenizer
 from nano_rl.trainer.optim import setup_optimizer
-
 from nano_rl.trainer.parallel_dims import get_parallel_dims
+from nano_rl.trainer.perf import get_perf_counter
 from nano_rl.trainer.scheduler import setup_scheduler
 from nano_rl.trainer.sft.config import SFTTrainerConfig
 from nano_rl.trainer.sft.data import setup_dataloader, setup_dataset
-from nano_rl.trainer.utils import log0, setup_torch_distributed
+from nano_rl.trainer.utils import log0, print_benchmark, setup_torch_distributed
 from nano_rl.trainer.world import get_world
 from nano_rl.utils.logger import setup_logger
+from nano_rl.utils.monitor import setup_monitor
 from nano_rl.utils.pydantic_config import parse_argv
+from nano_rl.utils.utils import to_col_format
 from torch.nn import CrossEntropyLoss
 
 
@@ -43,9 +45,13 @@ def train(config: SFTTrainerConfig) -> None:
     device = torch.device("cuda")
     torch.set_float32_matmul_precision("high")
 
+    # metrics monitor
+    monitor = setup_monitor(output_dir=config.output_dir)
+
     weight_manager = WeightCheckpointManager(config.output_dir, config=config.ckpt)
 
     parallel_dims = get_parallel_dims(config.model, config.data.seq_len)
+    log0(f"Parallel dimensions: {parallel_dims}")
     # batch_size is the unique number of samples we see before one optimizer step
     # since non_data_parallel_size GPUs process the same batch, we need more micro batches if cp/tp is enabled.
     total_micro_batches = config.data.batch_size * parallel_dims.non_data_parallel_size
@@ -66,6 +72,8 @@ def train(config: SFTTrainerConfig) -> None:
 
     log0(f"Loading tokenizer: {config.tokenizer.name}")
     tokenizer = setup_tokenizer(config.tokenizer)
+
+    log0(f"grad accum steps is {grad_accum_steps}")
 
     # Optimizer & scheduler
     optimizer = setup_optimizer(
@@ -110,9 +118,6 @@ def train(config: SFTTrainerConfig) -> None:
             # forward pass
             logits = model(input_ids=input_ids, position_ids=position_ids).logits
             B, L, V = logits.shape
-            # logger.info(
-            #     f"Batch input_ids shape: {input_ids.shape}, logits shape: {logits.shape}"
-            # )
 
             # Loss with masking
             loss = ce_loss(logits.view(-1, V), target_ids.view(-1)).view(B, L)
@@ -131,25 +136,51 @@ def train(config: SFTTrainerConfig) -> None:
             model.parameters(), max_norm=config.optim.max_norm
         ).full_tensor()
 
-        # total_norm = sqrt(
-        #     sum(x.grad**2 for x in model.parameters() if x.grad is not None)
-        # )
         optimizer.step()
         scheduler.step()
+        current_lr = optimizer.param_groups[0]["lr"]
 
         # synchronize loss across all ranks, only for logging and monitoring
         dist.all_reduce(batch_loss, op=dist.ReduceOp.AVG)
 
+        # Benchmark training
+        seq_len = config.data.seq_len
+        # batch_size is global (unique samples per step), so total tokens = batch_size * seq_len
+        num_tokens = config.data.batch_size * seq_len
+        perf_counter = get_perf_counter(model, config.data.seq_len)
+        perf_counter.count_tokens(num_tokens)
+        throughput = perf_counter.get_tokens_per_sec() or 0
+        mfu = perf_counter.get_mfu() or 0
+        peak_memory = torch.cuda.max_memory_allocated() / 1024**3  # convert to GiB
+
         step_time = time.perf_counter() - start_time
-        log0(
-            f"rank: {world.rank} | step {step} | Loss {batch_loss.item():.4f} | Grad Norm {grad_norm:.4f} | Step Time {step_time:.2}s"
+        monitor.log(
+            {
+                "loss/mean": batch_loss.mean(),
+                # Optimizer metrics
+                "optim/grad_norm": grad_norm.item(),
+                "optim/lr": current_lr,
+                # performance metrics
+                "perf/throughput": throughput,
+                "perf/mfu": mfu,
+                "perf/peak_memory": peak_memory,
+                # Time metrics
+                "time/step": step_time,
+            },
+            step=step,
         )
+
         if config.ckpt.interval and step > 0 and step % config.ckpt.interval == 0:
             weight_manager.save(step, model, tokenizer)
         step += 1
 
     # save final checkpoint
     weight_manager.save(step, model, tokenizer)
+    if world.is_master:
+        history = to_col_format(monitor.history)
+        print_benchmark(history)
+        monitor.close()
+
     log0("Training done")
 
 
