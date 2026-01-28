@@ -12,7 +12,7 @@ from nano_rl.trainer.parallel_dims import get_parallel_dims
 from nano_rl.trainer.perf import get_perf_counter
 from nano_rl.trainer.rl.broadcast import setup_weight_broadcast
 from nano_rl.trainer.rl.config import RlTrainerConfig
-from nano_rl.trainer.rl.data import DataLoader, FakeDataLoader
+from nano_rl.trainer.rl.data import DataLoader, FakeDataLoader, TensorBatch
 from nano_rl.trainer.rl.loss import (
     compute_entropy,
     compute_loss,
@@ -26,7 +26,6 @@ from nano_rl.utils.logger import setup_logger
 from nano_rl.utils.monitor import setup_monitor
 from nano_rl.utils.pydantic_config import parse_argv
 from nano_rl.utils.utils import to_col_format
-from torch.nn import CrossEntropyLoss
 
 
 def train(config: RlTrainerConfig) -> None:
@@ -76,7 +75,9 @@ def train(config: RlTrainerConfig) -> None:
     )
     log0("setting up data loader")
     if config.data.fake:
-        dataloader = FakeDataLoader(config.data.fake, config.model.seq_len)
+        dataloader = FakeDataLoader(
+            config.data.fake, config.model.seq_len, parallel_dims.dp_degree
+        )
     else:
         dataloader = DataLoader(
             output_dir=config.output_dir,
@@ -84,6 +85,7 @@ def train(config: RlTrainerConfig) -> None:
             seq_len=config.model.seq_len,
             tokenizer=tokenizer,
             config=config.rollout_transport,
+            dp_world_size=parallel_dims.dp_degree,
         )
 
     log0("starting training loop")
@@ -101,46 +103,72 @@ def train(config: RlTrainerConfig) -> None:
 
         # block until orchestrator writes a batch to filesystem
         dataloader.wait_for_batch()
-        batch = dataloader.get_batch()
+        batch: list[TensorBatch] = dataloader.get_batch()
         wait_time = time.perf_counter() - wait_start
 
         compute_start = time.perf_counter()
-        off_policy_step = step - batch["ckpt_step"]
-
-        # move batch to device
-        input_ids = batch["input_ids"].to(device)
-        position_ids = batch["position_ids"].to(device)
-        loss_mask = batch["loss_mask"].to(device)
-        advantages = batch["advantages"].to(device)
-        inference_logprobs = batch["inference_logprobs"].to(device)
-        temperature = batch["temperature"]
-
+        # Accumulate gradients over micro-batches
         optimizer.zero_grad()
-        # forward pass
-        logits = model(input_ids=input_ids, position_ids=position_ids).logits
-        logits = logits.float().contiguous()
+        total_loss = 0.0
+        total_tokens = 0
+        total_entropy = 0.0
+        total_off_policy_step = 0
+        total_mismatch_kl = 0.0
+        total_tokens_masked = 0.0
+        num_micro_batches = len(batch)
+        for micro_batch in batch:
+            off_policy_step = step - micro_batch["ckpt_step"]
+            total_off_policy_step += off_policy_step
 
-        # we shift here to match inference logprobs
-        shifted_logits = shift_logits(logits)
-        shifted_logits = shifted_logits / temperature
-        trainer_logprobs = selective_log_softmax(shifted_logits, input_ids)
+            # move batch to device
+            input_ids = micro_batch["input_ids"].to(device)
+            position_ids = micro_batch["position_ids"].to(device)
+            loss_mask = micro_batch["loss_mask"].to(device)
+            advantages = micro_batch["advantages"].to(device)
+            inference_logprobs = micro_batch["inference_logprobs"].to(device)
+            temperature = micro_batch["temperature"]
 
-        loss, loss_diagnostics = compute_loss(
-            trainer_logprobs=trainer_logprobs,
-            inference_logprobs=inference_logprobs,
-            advantages=advantages,
-            loss_mask=loss_mask,
-            loss_config=config.loss,
-        )
+            # forward pass
+            logits = model(input_ids=input_ids, position_ids=position_ids).logits
+            logits = logits.float().contiguous()
 
-        # compute entropy for monitoring, lower is better
-        entropy = compute_entropy(shifted_logits)
-        mean_entropy = entropy[loss_mask].mean()
+            # we shift here to match inference logprobs
+            shifted_logits = shift_logits(logits)
+            shifted_logits = shifted_logits / temperature
+            trainer_logprobs = selective_log_softmax(shifted_logits, input_ids)
 
-        del logits, shifted_logits
+            loss, loss_diagnostics = compute_loss(
+                trainer_logprobs=trainer_logprobs,
+                inference_logprobs=inference_logprobs,
+                advantages=advantages,
+                loss_mask=loss_mask,
+                loss_config=config.loss,
+            )
+            scaled_loss = loss / num_micro_batches
+            scaled_loss.backward()
+            total_loss += loss.item()
+            total_tokens += input_ids.numel()
+            total_mismatch_kl += loss_diagnostics["mismatch_kl"].item()
+            total_tokens_masked += loss_diagnostics["tokens_masked"].item()
 
-        # backward pass
-        loss.backward()
+            # compute entropy for monitoring, lower is better
+            entropy = compute_entropy(shifted_logits)
+            mean_entropy = entropy[loss_mask].mean()
+            total_entropy += mean_entropy.item()
+
+            del logits, shifted_logits, trainer_logprobs, loss, scaled_loss
+            # torch.cuda.empty_cache()
+
+        # Average loss across micro-batches
+        avg_loss = torch.tensor(total_loss / num_micro_batches, device=device)
+        avg_entropy = torch.tensor(total_entropy / num_micro_batches, device=device)
+        avg_off_policy_step = total_off_policy_step / num_micro_batches
+        avg_mismatch_kl = total_mismatch_kl / num_micro_batches
+        avg_tokens_masked = total_tokens_masked / num_micro_batches
+        # synchronize loss across all ranks, only for logging and monitoring
+        dist.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
+        dist.all_reduce(avg_entropy, op=dist.ReduceOp.AVG)
+
         # grad clipping, full_tensor returns the full tensor from all FSDP shards
         grad_norm = torch.nn.utils.clip_grad_norm_(
             model.parameters(), max_norm=config.optim.max_norm
@@ -151,21 +179,20 @@ def train(config: RlTrainerConfig) -> None:
         scheduler.step()
         current_lr = optimizer.param_groups[0]["lr"]
 
-        # synchronize loss across all ranks, only for logging and monitoring
-        # TODO: currently a no-op as all shards operate on the same batch, fix this.
-        dist.all_reduce(loss, op=dist.ReduceOp.AVG)
-
         compute_time = time.perf_counter() - compute_start
 
         batch_size = input_ids.shape[0]
         seq_len = input_ids.shape[1]
-        # All GPUs process the same batch, but it is processed on each GPU, so we multiply by dp_degree
-        num_tokens = batch_size * seq_len * parallel_dims.dp_degree
+        num_tokens = total_tokens
 
         # Log batch dimensions on first step for debugging
         if step == 0:
-            log0(f"Batch dims: batch_size={batch_size}, seq_len={seq_len}, num_tokens={num_tokens}")
-            log0(f"Expected tokens with config: {batch_size} * {config.model.seq_len} * {parallel_dims.dp_degree} = {batch_size * config.model.seq_len * parallel_dims.dp_degree}")
+            log0(
+                f"Batch dims: rank={world.rank} batch_size={batch_size}, seq_len={seq_len}, num_tokens={num_tokens}"
+            )
+            log0(
+                f"Expected rank={world.rank} tokens with config: {batch_size} * {config.model.seq_len} * {parallel_dims.dp_degree} = {batch_size * config.model.seq_len * parallel_dims.dp_degree}"
+            )
 
         perf_counter.count_tokens(num_tokens)
         throughput = perf_counter.get_tokens_per_sec() or 0
@@ -176,22 +203,25 @@ def train(config: RlTrainerConfig) -> None:
 
         log0(
             f"Step {step} | "
-            f"Loss {loss.item():.4f} | "
+            f"Loss {avg_loss.item():.4f} | "
             f"Wait {wait_time:.2f}s | "
             f"Compute {compute_time:.2f}s | "
-            f"MFU {mfu:.2f}% | "
+            f"MFU {mfu:.2f}% |"
+            f"num micro-batches {num_micro_batches}|"
             f"Throughput {throughput:.0f} tok/s"
         )
 
         monitor.log(
             {
-                "loss/mean": loss.item(),
-                "loss/entropy": mean_entropy.item(),
-                "loss/mismatch_kl": loss_diagnostics["mismatch_kl"].item(),
-                "loss/tokens_masked": loss_diagnostics["tokens_masked"].item(),
+                "loss/mean": avg_loss.item(),
+                "loss/entropy": avg_entropy.item(),
+                "loss/mismatch_kl": avg_mismatch_kl,
+                "loss/tokens_masked": avg_tokens_masked,
                 # Optimizer metrics
                 "optim/grad_norm": grad_norm.item(),
                 "optim/lr": current_lr,
+                # Training metrics
+                "train/off_policy_step": avg_off_policy_step,
                 # performance metrics
                 "perf/throughput": throughput,
                 "perf/mfu": mfu,

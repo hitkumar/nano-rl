@@ -1,12 +1,11 @@
 """Unit tests for RL DataLoader"""
 
-from unittest.mock import MagicMock, Mock
+from unittest.mock import Mock
 
 import pytest
-import torch
 
-from nano_rl.trainer.rl.data import DataLoader, TensorBatch
-from nano_rl.transport.types import TrainingBatch, TrainingSample
+from nano_rl.trainer.rl.data import DataLoader
+from nano_rl.transport.types import MicroBatch
 
 
 class TestDataLoaderGetBatch:
@@ -22,11 +21,18 @@ class TestDataLoaderGetBatch:
         return Mock()
 
     @pytest.fixture
-    def data_loader(self, mock_tokenizer, mock_receiver, monkeypatch):
-        # Mock get_world and setup_training_batch_receiver
-        monkeypatch.setattr("nano_rl.trainer.rl.data.get_world", lambda: Mock())
+    def mock_world(self):
+        world = Mock()
+        world.is_master = False
+        world.rank = 0
+        world.world_size = 1
+        return world
+
+    @pytest.fixture
+    def data_loader(self, mock_tokenizer, mock_receiver, mock_world, monkeypatch):
+        monkeypatch.setattr("nano_rl.trainer.rl.data.get_world", lambda: mock_world)
         monkeypatch.setattr(
-            "nano_rl.trainer.rl.data.setup_training_batch_receiver",
+            "nano_rl.trainer.rl.data.setup_micro_batch_receiver",
             lambda *args: mock_receiver,
         )
 
@@ -36,119 +42,119 @@ class TestDataLoaderGetBatch:
             seq_len=128,
             tokenizer=mock_tokenizer,
             config=Mock(),
+            dp_world_size=1,
         )
         return loader
 
-    def test_get_batch_pads_to_max_len(
-        self, data_loader, mock_receiver, mock_tokenizer
-    ):
-        """Test that shorter sequences are padded"""
-        training_batch = TrainingBatch(
-            examples=[
-                TrainingSample(
-                    prompt_ids=[1, 2],
-                    prompt_mask=[True, True],
-                    completion_ids=[3, 4, 5, 6],
-                    completion_mask=[True, True, True, True],
-                    completion_logprobs=[-0.5, -0.3, -0.4, -0.2],
-                    advantage=1.0,
-                ),
-                TrainingSample(
-                    prompt_ids=[1],
-                    prompt_mask=[True],
-                    completion_ids=[2],
-                    completion_mask=[True],
-                    completion_logprobs=[-0.5],
-                    advantage=0.5,
-                ),
-            ],
+    def test_get_batch_returns_list(self, data_loader, mock_receiver):
+        """Test that get_batch returns a list of TensorBatch"""
+        micro_batch = MicroBatch(
+            input_ids=[1, 2, 3, 4],
+            position_ids=[0, 1, 2, 3],
+            loss_mask=[0, 0, 1, 1],
+            advantages=[0.0, 0.0, 1.0, 1.0],
+            inference_logprobs=[0.0, 0.0, -0.5, -0.3],
             temperature=1.0,
-            step=0,
             ckpt_step=0,
         )
-        mock_receiver.receive.return_value = training_batch
+        mock_receiver.receive.return_value = [micro_batch]
 
-        batch = data_loader.get_batch()
+        batches = data_loader.get_batch()
 
-        # Max len is 6 (from first example: 2 + 4)
-        assert batch["input_ids"].shape == (2, 6)
+        assert isinstance(batches, list)
+        assert len(batches) == 1
 
-        # Second example should be padded
-        pad_id = mock_tokenizer.pad_token_id
-        assert batch["input_ids"][1, 2:].tolist() == [pad_id] * 4
-
-    def test_get_batch_truncates_to_seq_len(self, data_loader, mock_receiver):
-        """Test that sequences are truncated to seq_len"""
-        # Create example longer than seq_len (128)
-        long_prompt = list(range(100))
-        long_completion = list(range(100, 150))  # Total: 150 > 128
-
-        training_batch = TrainingBatch(
-            examples=[
-                TrainingSample(
-                    prompt_ids=long_prompt,
-                    prompt_mask=[True] * 100,
-                    completion_ids=long_completion,
-                    completion_mask=[True] * 50,
-                    completion_logprobs=[-0.5] * 50,
-                    advantage=1.0,
-                )
-            ],
+    def test_get_batch_converts_to_tensors(self, data_loader, mock_receiver):
+        """Test that MicroBatch is correctly converted to TensorBatch"""
+        micro_batch = MicroBatch(
+            input_ids=[1, 2, 3, 4],
+            position_ids=[0, 1, 2, 3],
+            loss_mask=[0, 0, 1, 1],
+            advantages=[0.0, 0.0, 1.0, 1.0],
+            inference_logprobs=[0.0, 0.0, -0.5, -0.3],
             temperature=1.0,
-            step=0,
-            ckpt_step=0,
+            ckpt_step=5,
         )
-        mock_receiver.receive.return_value = training_batch
+        mock_receiver.receive.return_value = [micro_batch]
 
-        batch = data_loader.get_batch()
+        batches = data_loader.get_batch()
+        batch = batches[0]
 
-        # Should be truncated to seq_len
-        assert batch["input_ids"].shape == (1, 128)
+        # Check shape is (1, seq_len) due to unsqueeze(0)
+        assert batch["input_ids"].shape == (1, 4)
+        assert batch["position_ids"].shape == (1, 4)
+        assert batch["loss_mask"].shape == (1, 4)
+        assert batch["advantages"].shape == (1, 4)
+        assert batch["inference_logprobs"].shape == (1, 4)
 
-    def test_get_batch_none_advantage(self, data_loader, mock_receiver):
-        """Test that None advantage defaults to 0.0"""
-        training_batch = TrainingBatch(
-            examples=[
-                TrainingSample(
-                    prompt_ids=[1, 2],
-                    prompt_mask=[True, True],
-                    completion_ids=[3, 4],
-                    completion_mask=[True, True],
-                    completion_logprobs=[-0.5, -0.3],
-                    advantage=None,
-                )
-            ],
-            temperature=1.0,
-            step=0,
-            ckpt_step=0,
+        # Check values
+        assert batch["input_ids"][0].tolist() == [1, 2, 3, 4]
+        assert batch["position_ids"][0].tolist() == [0, 1, 2, 3]
+        assert batch["loss_mask"][0].tolist() == [False, False, True, True]
+        assert batch["advantages"][0].tolist() == [0.0, 0.0, 1.0, 1.0]
+        # Use pytest.approx for float comparison due to float32 precision
+        assert batch["inference_logprobs"][0].tolist() == pytest.approx(
+            [0.0, 0.0, -0.5, -0.3]
         )
-        mock_receiver.receive.return_value = training_batch
-
-        batch = data_loader.get_batch()
-
-        # Advantages should be 0.0 for completion tokens
-        assert batch["advantages"][0, 2:4].tolist() == [0.0, 0.0]
 
     def test_get_batch_includes_ckpt_step(self, data_loader, mock_receiver):
         """Test that ckpt_step is correctly passed through to TensorBatch"""
-        training_batch = TrainingBatch(
-            examples=[
-                TrainingSample(
-                    prompt_ids=[1, 2],
-                    prompt_mask=[True, True],
-                    completion_ids=[3, 4],
-                    completion_mask=[True, True],
-                    completion_logprobs=[-0.5, -0.3],
-                    advantage=1.0,
-                )
-            ],
+        micro_batch = MicroBatch(
+            input_ids=[1, 2, 3, 4],
+            position_ids=[0, 1, 2, 3],
+            loss_mask=[0, 0, 1, 1],
+            advantages=[0.0, 0.0, 1.0, 1.0],
+            inference_logprobs=[0.0, 0.0, -0.5, -0.3],
             temperature=1.0,
-            step=5,
             ckpt_step=3,
         )
-        mock_receiver.receive.return_value = training_batch
+        mock_receiver.receive.return_value = [micro_batch]
 
-        batch = data_loader.get_batch()
+        batches = data_loader.get_batch()
 
-        # ckpt_step should be passed through
-        assert batch["ckpt_step"] == 3
+        assert batches[0]["ckpt_step"] == 3
+
+    def test_get_batch_includes_temperature(self, data_loader, mock_receiver):
+        """Test that temperature is correctly passed through to TensorBatch"""
+        micro_batch = MicroBatch(
+            input_ids=[1, 2, 3, 4],
+            position_ids=[0, 1, 2, 3],
+            loss_mask=[0, 0, 1, 1],
+            advantages=[0.0, 0.0, 1.0, 1.0],
+            inference_logprobs=[0.0, 0.0, -0.5, -0.3],
+            temperature=0.7,
+            ckpt_step=0,
+        )
+        mock_receiver.receive.return_value = [micro_batch]
+
+        batches = data_loader.get_batch()
+
+        assert batches[0]["temperature"] == 0.7
+
+    def test_get_batch_multiple_micro_batches(self, data_loader, mock_receiver):
+        """Test that multiple MicroBatches are all converted"""
+        micro_batch_1 = MicroBatch(
+            input_ids=[1, 2],
+            position_ids=[0, 1],
+            loss_mask=[0, 1],
+            advantages=[0.0, 1.0],
+            inference_logprobs=[0.0, -0.5],
+            temperature=1.0,
+            ckpt_step=0,
+        )
+        micro_batch_2 = MicroBatch(
+            input_ids=[3, 4],
+            position_ids=[0, 1],
+            loss_mask=[0, 1],
+            advantages=[0.0, 2.0],
+            inference_logprobs=[0.0, -0.3],
+            temperature=1.0,
+            ckpt_step=0,
+        )
+        mock_receiver.receive.return_value = [micro_batch_1, micro_batch_2]
+
+        batches = data_loader.get_batch()
+
+        assert len(batches) == 2
+        assert batches[0]["input_ids"][0].tolist() == [1, 2]
+        assert batches[1]["input_ids"][0].tolist() == [3, 4]

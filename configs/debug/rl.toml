@@ -1,6 +1,6 @@
 max_steps = 10
 
 [model]
-seq_len = 350
+seq_len = 8192
 
 [ckpt]

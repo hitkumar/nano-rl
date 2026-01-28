@@ -19,3 +19,14 @@ class TrainingBatch(msgspec.Struct, array_like=True, gc=False, omit_defaults=Tru
     temperature: float
     step: int
     ckpt_step: int  # Policy step that generated this batch, used to measure how off policy our training is
+
+
+# Packer -> Trainer
+class MicroBatch(msgspec.Struct, array_like=True, gc=False, omit_defaults=True):
+    input_ids: list[int]
+    position_ids: list[int]
+    loss_mask: list[int]  # true for completion tokens
+    advantages: list[float]  # per token advantages
+    inference_logprobs: list[float]
+    temperature: float
+    ckpt_step: int  # Policy step that generated this batch, used to measure how off policy our training is

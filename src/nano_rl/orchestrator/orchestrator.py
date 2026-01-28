@@ -6,7 +6,7 @@ import random
 import uvloop
 import verifiers as vf
 from nano_rl.orchestrator.advantage import compute_advantages
-from nano_rl.orchestrator.config import AdvantageConfig, OrchestratorConfig
+from nano_rl.orchestrator.config import OrchestratorConfig
 from nano_rl.orchestrator.scheduler import Scheduler
 from nano_rl.orchestrator.utils import set_semaphore
 from nano_rl.transport import setup_training_batch_sender, TrainingBatch, TrainingSample

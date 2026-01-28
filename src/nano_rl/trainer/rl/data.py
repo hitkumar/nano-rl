@@ -9,8 +9,9 @@ from typing import TypedDict
 import torch
 from jaxtyping import Bool, Float, Int
 from nano_rl.trainer.rl.config import FakeDataLoaderConfig
+from nano_rl.trainer.rl.packer import Packer, setup_packer
 from nano_rl.trainer.world import get_world
-from nano_rl.transport import setup_training_batch_receiver, TrainingBatch
+from nano_rl.transport import MicroBatch, setup_micro_batch_receiver
 from nano_rl.transport.config import TransportConfigType
 from torch import Tensor
 from transformers.tokenization_utils import PreTrainedTokenizer
@@ -39,16 +40,24 @@ class TensorBatch(TypedDict):
 class FakeDataLoader:
     """Fake debugging data"""
 
-    def __init__(self, config: FakeDataLoaderConfig, seq_len: int):
+    def __init__(self, config: FakeDataLoaderConfig, seq_len: int, dp_world_size: int):
         self.seq_len = seq_len
         self.batch_size = config.batch_size
         self.step = 0
+        self.dp_world_size = dp_world_size
+        self.world = get_world()
+
+        # compute the rank
+        non_dp_world_size = self.world.world_size // self.dp_world_size
+        self.rank = self.world.rank // non_dp_world_size
 
     def wait_for_batch(self) -> None:
         pass
 
-    def get_batch(self) -> TensorBatch:
-        generator = torch.Generator().manual_seed(self.step)
+    def get_batch(self) -> list[TensorBatch]:
+        # Use dp_rank in seed to ensure different data per rank
+        seed = self.rank * 1000000 + self.step * 1000
+        generator = torch.Generator().manual_seed(seed)
         self.step += 1
 
         input_ids = torch.randint(
@@ -68,20 +77,22 @@ class FakeDataLoader:
             torch.randn(self.batch_size, self.seq_len, generator=generator) - 11.0
         )
 
-        return TensorBatch(
-            input_ids=input_ids,
-            position_ids=position_ids,
-            loss_mask=loss_mask,
-            advantages=advantages,
-            inference_logprobs=inference_logprobs,
-            temperature=1.0,
-            ckpt_step=self.step,
-        )
+        return [
+            TensorBatch(
+                input_ids=input_ids,
+                position_ids=position_ids,
+                loss_mask=loss_mask,
+                advantages=advantages,
+                inference_logprobs=inference_logprobs,
+                temperature=1.0,
+                ckpt_step=self.step,
+            )
+        ]
 
 
 class DataLoader:
     """
-    Loads training batches written by orchestrator using filesystem receive
+    Loads micro batches written by packer. Master rank runs packer.
     """
 
     def __init__(
@@ -91,89 +102,63 @@ class DataLoader:
         seq_len: int,
         tokenizer: PreTrainedTokenizer,
         config: TransportConfigType,
+        dp_world_size: int,
     ):
         self.world = get_world()
         self.seq_len = seq_len
         self.tokenizer = tokenizer
+        self.dp_world_size = dp_world_size
 
-        self.receiver = setup_training_batch_receiver(output_dir, start_step, config)
+        # compute the rank
+        non_dp_world_size = self.world.world_size // self.dp_world_size
+        self.rank = self.world.rank // non_dp_world_size
+
+        self.packer: Packer | None = None
+        if self.world.is_master:
+            self.packer = setup_packer(
+                output_dir, dp_world_size, seq_len, tokenizer, config, start_step
+            )
+
+        # All ranks receive their own microbatches
+        self.receiver = setup_micro_batch_receiver(
+            output_dir, self.rank, start_step, config
+        )
 
     def wait_for_batch(self) -> None:
         """
         Wait for next batch to be available.
-        Blocks until orchestrator writes the batch file.
+        Master rank packs the data first, then all ranks wait for their files.
         """
+        if self.packer is not None:
+            self.packer.pack()
         self.receiver.wait()
 
-    def get_batch(self) -> TensorBatch:
-        training_batch: TrainingBatch = self.receiver.receive()
-        return self._batch_to_tensors(training_batch)
+    def get_batch(self) -> list[TensorBatch]:
+        micro_batches: list[MicroBatch] = self.receiver.receive()
+        return [
+            self._micro_batch_to_tensor(micro_batch) for micro_batch in micro_batches
+        ]
 
-    def _batch_to_tensors(self, batch: TrainingBatch) -> TensorBatch:
+    def _micro_batch_to_tensor(self, micro_batch: MicroBatch) -> TensorBatch:
         """
-        Converts TrainingBatch from orchestrator to padded tensors that can be used for training
-        TrainingSample contains variable-length lists:
-        - prompt_ids: [1, 2, 3, ...]
-        - completion_ids: [4, 5, 6, ...]
-        - completion_logprobs: [-0.5, -0.3, ...]
-
-        We need to:
-        1. Concatenate prompt + completion
-        2. Pad to same length
-        3. Create appropriate masks
+        Converts MicroBatch to TensorBatch
         """
-        batch_size = len(batch.examples)
-        # Use EOS as pad token if pad_token not set
-        pad_id = (
-            self.tokenizer.pad_token_id
-            if self.tokenizer.pad_token_id is not None
-            else self.tokenizer.eos_token_id
-        )
-
-        # Find max sequence length in batch (but cap at config seq_len)
-        max_len = min(
-            max(len(e.prompt_ids) + len(e.completion_ids) for e in batch.examples),
-            self.seq_len,
-        )
-
-        # initialize tensors
-        input_ids = torch.full((batch_size, max_len), pad_id, dtype=torch.long)
-        position_ids = torch.zeros(batch_size, max_len, dtype=torch.long)
-        loss_mask = torch.zeros(batch_size, max_len, dtype=torch.bool)
-        advantages = torch.zeros(batch_size, max_len, dtype=torch.float)
-        inference_logprobs = torch.zeros(batch_size, max_len, dtype=torch.float)
-
-        for i, example in enumerate(batch.examples):
-            prompt_ids = example.prompt_ids
-            completion_ids = example.completion_ids
-            completion_logprobs = example.completion_logprobs
-            advantage = example.advantage if example.advantage is not None else 0.0
-
-            total_len = len(prompt_ids) + len(completion_ids)
-            if max_len < total_len:
-                truncate_len = total_len - max_len
-                completion_ids = completion_ids[:-truncate_len]
-                completion_logprobs = completion_logprobs[:-truncate_len]
-                total_len = len(prompt_ids) + len(completion_ids)
-
-            prompt_len = len(prompt_ids)
-            input_ids[i, :total_len] = torch.tensor(prompt_ids + completion_ids)
-            position_ids[i, :total_len] = torch.arange(total_len)
-            loss_mask[i, prompt_len:total_len] = True
-            # same value for all tokens in completion, this is not ideal
-            advantages[i, prompt_len:total_len] = advantage
-
-            # Prompt tokens get 0 (they don't contribute to loss anyway)
-            inference_logprobs[i, prompt_len:total_len] = torch.tensor(
-                completion_logprobs
-            )
-
         return TensorBatch(
-            input_ids=input_ids,
-            position_ids=position_ids,
-            loss_mask=loss_mask,
-            advantages=advantages,
-            inference_logprobs=inference_logprobs,
-            temperature=batch.temperature,
-            ckpt_step=batch.ckpt_step,
+            input_ids=torch.tensor(micro_batch.input_ids, dtype=torch.long).unsqueeze(
+                0
+            ),
+            position_ids=torch.tensor(
+                micro_batch.position_ids, dtype=torch.long
+            ).unsqueeze(0),
+            loss_mask=torch.tensor(micro_batch.loss_mask, dtype=torch.bool).unsqueeze(
+                0
+            ),
+            advantages=torch.tensor(
+                micro_batch.advantages, dtype=torch.float
+            ).unsqueeze(0),
+            inference_logprobs=torch.tensor(
+                micro_batch.inference_logprobs, dtype=torch.float
+            ).unsqueeze(0),
+            temperature=micro_batch.temperature,
+            ckpt_step=micro_batch.ckpt_step,
         )
