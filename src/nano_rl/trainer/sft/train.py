@@ -60,7 +60,6 @@ def train(config: SFTTrainerConfig) -> None:
         total_micro_batches % samples_per_fwd_pass == 0
     ), f"total_micro_batches ({total_micro_batches}) % samples_per_fwd_pass ({samples_per_fwd_pass}) != 0"
     grad_accum_steps = total_micro_batches // samples_per_fwd_pass
-    # logger.info(f"grad_accum_steps: {grad_accum_steps}")
     assert (
         grad_accum_steps > 0
     ), f"grad_accum_steps ({grad_accum_steps}) must be greater than 0"

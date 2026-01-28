@@ -103,7 +103,7 @@ def train(config: RlTrainerConfig) -> None:
 
         # block until orchestrator writes a batch to filesystem
         dataloader.wait_for_batch()
-        batch: list[TensorBatch] = dataloader.get_batch()
+        batch: TensorBatch = dataloader.get_batch()
         wait_time = time.perf_counter() - wait_start
 
         compute_start = time.perf_counter()
@@ -115,18 +115,29 @@ def train(config: RlTrainerConfig) -> None:
         total_off_policy_step = 0
         total_mismatch_kl = 0.0
         total_tokens_masked = 0.0
-        num_micro_batches = len(batch)
-        for micro_batch in batch:
-            off_policy_step = step - micro_batch["ckpt_step"]
+
+        # Split batch into chunks for gradient accumulation
+        grad_accum_steps = config.gradient_accumulation_steps
+        batch_size = batch["input_ids"].shape[0]
+        assert batch_size % grad_accum_steps == 0
+        chunk_size = batch_size // grad_accum_steps
+
+        for i in range(grad_accum_steps):
+            start_idx = i * chunk_size
+            end_idx = start_idx + chunk_size if i < grad_accum_steps - 1 else batch_size
+
+            off_policy_step = step - batch["ckpt_step"]
             total_off_policy_step += off_policy_step
 
-            # move batch to device
-            input_ids = micro_batch["input_ids"].to(device)
-            position_ids = micro_batch["position_ids"].to(device)
-            loss_mask = micro_batch["loss_mask"].to(device)
-            advantages = micro_batch["advantages"].to(device)
-            inference_logprobs = micro_batch["inference_logprobs"].to(device)
-            temperature = micro_batch["temperature"]
+            # move batch chunk to device
+            input_ids = batch["input_ids"][start_idx:end_idx].to(device)
+            position_ids = batch["position_ids"][start_idx:end_idx].to(device)
+            loss_mask = batch["loss_mask"][start_idx:end_idx].to(device)
+            advantages = batch["advantages"][start_idx:end_idx].to(device)
+            inference_logprobs = batch["inference_logprobs"][start_idx:end_idx].to(
+                device
+            )
+            temperature = batch["temperature"]
 
             # forward pass
             logits = model(input_ids=input_ids, position_ids=position_ids).logits
@@ -144,7 +155,7 @@ def train(config: RlTrainerConfig) -> None:
                 loss_mask=loss_mask,
                 loss_config=config.loss,
             )
-            scaled_loss = loss / num_micro_batches
+            scaled_loss = loss / grad_accum_steps
             scaled_loss.backward()
             total_loss += loss.item()
             total_tokens += input_ids.numel()
@@ -159,12 +170,12 @@ def train(config: RlTrainerConfig) -> None:
             del logits, shifted_logits, trainer_logprobs, loss, scaled_loss
             # torch.cuda.empty_cache()
 
-        # Average loss across micro-batches
-        avg_loss = torch.tensor(total_loss / num_micro_batches, device=device)
-        avg_entropy = torch.tensor(total_entropy / num_micro_batches, device=device)
-        avg_off_policy_step = total_off_policy_step / num_micro_batches
-        avg_mismatch_kl = total_mismatch_kl / num_micro_batches
-        avg_tokens_masked = total_tokens_masked / num_micro_batches
+        # Average loss across gradient accumulation steps
+        avg_loss = torch.tensor(total_loss / grad_accum_steps, device=device)
+        avg_entropy = torch.tensor(total_entropy / grad_accum_steps, device=device)
+        avg_off_policy_step = total_off_policy_step / grad_accum_steps
+        avg_mismatch_kl = total_mismatch_kl / grad_accum_steps
+        avg_tokens_masked = total_tokens_masked / grad_accum_steps
         # synchronize loss across all ranks, only for logging and monitoring
         dist.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
         dist.all_reduce(avg_entropy, op=dist.ReduceOp.AVG)
@@ -181,20 +192,17 @@ def train(config: RlTrainerConfig) -> None:
 
         compute_time = time.perf_counter() - compute_start
 
-        batch_size = input_ids.shape[0]
-        seq_len = input_ids.shape[1]
-        num_tokens = total_tokens
+        # total_tokens is tokens processed by this rank only
+        # multiply by dp_degree to get global tokens for MFU calculation
+        global_tokens = total_tokens * parallel_dims.dp_degree
 
         # Log batch dimensions on first step for debugging
         if step == 0:
             log0(
-                f"Batch dims: rank={world.rank} batch_size={batch_size}, seq_len={seq_len}, num_tokens={num_tokens}"
-            )
-            log0(
-                f"Expected rank={world.rank} tokens with config: {batch_size} * {config.model.seq_len} * {parallel_dims.dp_degree} = {batch_size * config.model.seq_len * parallel_dims.dp_degree}"
+                f"Batch dims: rank={world.rank} batch_size={batch_size}, seq_len={config.model.seq_len}, local_tokens={total_tokens}, global_tokens={global_tokens}"
             )
 
-        perf_counter.count_tokens(num_tokens)
+        perf_counter.count_tokens(global_tokens)
         throughput = perf_counter.get_tokens_per_sec() or 0
         mfu = perf_counter.get_mfu() or 0
         peak_memory = torch.cuda.max_memory_allocated() / 1024**3  # convert to GiB
@@ -207,7 +215,7 @@ def train(config: RlTrainerConfig) -> None:
             f"Wait {wait_time:.2f}s | "
             f"Compute {compute_time:.2f}s | "
             f"MFU {mfu:.2f}% |"
-            f"num micro-batches {num_micro_batches}|"
+            f"batch_size {batch_size}|"
             f"Throughput {throughput:.0f} tok/s"
         )
 

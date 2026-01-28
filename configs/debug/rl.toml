@@ -2,5 +2,6 @@ max_steps = 10
 
 [model]
 seq_len = 8192
+impl = "liger_kernel"
 
 [ckpt]

@@ -179,6 +179,14 @@ class RlTrainerConfig(BaseSettings):
         ),
     ] = 600
 
+    gradient_accumulation_steps: Annotated[
+        int,
+        Field(
+            ge=1,
+            description="Number of gradient accumulation steps. Splits the batch into this many chunks for sequential forward/backward passes before optimizer step.",
+        ),
+    ] = 1
+
     @model_validator(mode="after")
     def auto_setup_tokenizer(self):
         if self.tokenizer.name is None:

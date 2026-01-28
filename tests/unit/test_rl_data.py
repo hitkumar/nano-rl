@@ -46,8 +46,8 @@ class TestDataLoaderGetBatch:
         )
         return loader
 
-    def test_get_batch_returns_list(self, data_loader, mock_receiver):
-        """Test that get_batch returns a list of TensorBatch"""
+    def test_get_batch_returns_tensor_batch(self, data_loader, mock_receiver):
+        """Test that get_batch returns a single TensorBatch with stacked tensors"""
         micro_batch = MicroBatch(
             input_ids=[1, 2, 3, 4],
             position_ids=[0, 1, 2, 3],
@@ -59,10 +59,11 @@ class TestDataLoaderGetBatch:
         )
         mock_receiver.receive.return_value = [micro_batch]
 
-        batches = data_loader.get_batch()
+        batch = data_loader.get_batch()
 
-        assert isinstance(batches, list)
-        assert len(batches) == 1
+        # Should return a dict (TensorBatch), not a list
+        assert isinstance(batch, dict)
+        assert "input_ids" in batch
 
     def test_get_batch_converts_to_tensors(self, data_loader, mock_receiver):
         """Test that MicroBatch is correctly converted to TensorBatch"""
@@ -77,10 +78,9 @@ class TestDataLoaderGetBatch:
         )
         mock_receiver.receive.return_value = [micro_batch]
 
-        batches = data_loader.get_batch()
-        batch = batches[0]
+        batch = data_loader.get_batch()
 
-        # Check shape is (1, seq_len) due to unsqueeze(0)
+        # Check shape is (1, seq_len) - 1 micro batch stacked
         assert batch["input_ids"].shape == (1, 4)
         assert batch["position_ids"].shape == (1, 4)
         assert batch["loss_mask"].shape == (1, 4)
@@ -110,9 +110,9 @@ class TestDataLoaderGetBatch:
         )
         mock_receiver.receive.return_value = [micro_batch]
 
-        batches = data_loader.get_batch()
+        batch = data_loader.get_batch()
 
-        assert batches[0]["ckpt_step"] == 3
+        assert batch["ckpt_step"] == 3
 
     def test_get_batch_includes_temperature(self, data_loader, mock_receiver):
         """Test that temperature is correctly passed through to TensorBatch"""
@@ -127,12 +127,12 @@ class TestDataLoaderGetBatch:
         )
         mock_receiver.receive.return_value = [micro_batch]
 
-        batches = data_loader.get_batch()
+        batch = data_loader.get_batch()
 
-        assert batches[0]["temperature"] == 0.7
+        assert batch["temperature"] == 0.7
 
-    def test_get_batch_multiple_micro_batches(self, data_loader, mock_receiver):
-        """Test that multiple MicroBatches are all converted"""
+    def test_get_batch_stacks_multiple_micro_batches(self, data_loader, mock_receiver):
+        """Test that multiple MicroBatches are stacked into a single TensorBatch"""
         micro_batch_1 = MicroBatch(
             input_ids=[1, 2],
             position_ids=[0, 1],
@@ -153,8 +153,9 @@ class TestDataLoaderGetBatch:
         )
         mock_receiver.receive.return_value = [micro_batch_1, micro_batch_2]
 
-        batches = data_loader.get_batch()
+        batch = data_loader.get_batch()
 
-        assert len(batches) == 2
-        assert batches[0]["input_ids"][0].tolist() == [1, 2]
-        assert batches[1]["input_ids"][0].tolist() == [3, 4]
+        # Should be stacked into shape (2, seq_len)
+        assert batch["input_ids"].shape == (2, 2)
+        assert batch["input_ids"][0].tolist() == [1, 2]
+        assert batch["input_ids"][1].tolist() == [3, 4]

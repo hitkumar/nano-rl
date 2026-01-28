@@ -54,7 +54,7 @@ class FakeDataLoader:
     def wait_for_batch(self) -> None:
         pass
 
-    def get_batch(self) -> list[TensorBatch]:
+    def get_batch(self) -> TensorBatch:
         # Use dp_rank in seed to ensure different data per rank
         seed = self.rank * 1000000 + self.step * 1000
         generator = torch.Generator().manual_seed(seed)
@@ -77,17 +77,15 @@ class FakeDataLoader:
             torch.randn(self.batch_size, self.seq_len, generator=generator) - 11.0
         )
 
-        return [
-            TensorBatch(
-                input_ids=input_ids,
-                position_ids=position_ids,
-                loss_mask=loss_mask,
-                advantages=advantages,
-                inference_logprobs=inference_logprobs,
-                temperature=1.0,
-                ckpt_step=self.step,
-            )
-        ]
+        return TensorBatch(
+            input_ids=input_ids,
+            position_ids=position_ids,
+            loss_mask=loss_mask,
+            advantages=advantages,
+            inference_logprobs=inference_logprobs,
+            temperature=1.0,
+            ckpt_step=self.step,
+        )
 
 
 class DataLoader:
@@ -133,32 +131,35 @@ class DataLoader:
             self.packer.pack()
         self.receiver.wait()
 
-    def get_batch(self) -> list[TensorBatch]:
-        micro_batches: list[MicroBatch] = self.receiver.receive()
-        return [
-            self._micro_batch_to_tensor(micro_batch) for micro_batch in micro_batches
-        ]
-
-    def _micro_batch_to_tensor(self, micro_batch: MicroBatch) -> TensorBatch:
+    def get_batch(self) -> TensorBatch:
         """
-        Converts MicroBatch to TensorBatch
+        Get the next batch of training data.
+        Returns a single TensorBatch with all micro batches stacked together.
+        """
+        micro_batches: list[MicroBatch] = self.receiver.receive()
+        return self._collate_micro_batches(micro_batches)
+
+    def _collate_micro_batches(self, micro_batches: list[MicroBatch]) -> TensorBatch:
+        """
+        Collate multiple MicroBatches into a single TensorBatch.
+        Stacks all sequences into tensors of shape [num_micro_batches, seq_len].
         """
         return TensorBatch(
-            input_ids=torch.tensor(micro_batch.input_ids, dtype=torch.long).unsqueeze(
-                0
+            input_ids=torch.tensor(
+                [mb.input_ids for mb in micro_batches], dtype=torch.long
             ),
             position_ids=torch.tensor(
-                micro_batch.position_ids, dtype=torch.long
-            ).unsqueeze(0),
-            loss_mask=torch.tensor(micro_batch.loss_mask, dtype=torch.bool).unsqueeze(
-                0
+                [mb.position_ids for mb in micro_batches], dtype=torch.long
+            ),
+            loss_mask=torch.tensor(
+                [mb.loss_mask for mb in micro_batches], dtype=torch.bool
             ),
             advantages=torch.tensor(
-                micro_batch.advantages, dtype=torch.float
-            ).unsqueeze(0),
+                [mb.advantages for mb in micro_batches], dtype=torch.float
+            ),
             inference_logprobs=torch.tensor(
-                micro_batch.inference_logprobs, dtype=torch.float
-            ).unsqueeze(0),
-            temperature=micro_batch.temperature,
-            ckpt_step=micro_batch.ckpt_step,
+                [mb.inference_logprobs for mb in micro_batches], dtype=torch.float
+            ),
+            temperature=micro_batches[0].temperature,
+            ckpt_step=micro_batches[0].ckpt_step,
         )

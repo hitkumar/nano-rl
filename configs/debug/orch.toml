@@ -1,6 +1,6 @@
 max_steps = 10
 max_async_level = 5
-batch_size = 168
+batch_size = 272
 seq_len = 8192
 
 [sampling]
