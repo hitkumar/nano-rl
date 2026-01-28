@@ -4,6 +4,7 @@ Coordinates rollout generation with weight updates in an async RL training loop.
 
 import asyncio
 import random
+import time
 from typing import Any
 
 import verifiers as vf
@@ -76,9 +77,11 @@ class Scheduler:
         latest_step = resolve_latest_ckpt_dir(self.broadcasts_dir)
         if latest_step is not None and latest_step > self.current_weight_step:
             weights_path = get_step_path(self.broadcasts_dir, latest_step)
+            update_start = time.perf_counter()
             await update_weights(self.admin_client, weights_path)
+            update_time = time.perf_counter() - update_start
             self.current_weight_step = latest_step
-            self.logger.info(f"Updated to weights step: {latest_step}")
+            self.logger.info(f"Updated to weights step: {latest_step} (took {update_time:.2f}s)")
             # possibly unblock batch generation
             self.checkpoint_ready.set()
 
@@ -100,6 +103,7 @@ class Scheduler:
     async def schedule_group_rollout(
         self, env: vf.Environment, example: dict[str, Any]
     ) -> list[vf.State]:
+        start = time.perf_counter()
         states = await generate_group(
             client=self.client,
             env=env,
@@ -108,31 +112,49 @@ class Scheduler:
             rollouts_per_example=self.config.rollouts_per_example,
             sampling_args=self.sampling_args,
         )
+        elapsed = time.perf_counter() - start
+        self.logger.debug(f"group_rollout took {elapsed:.2f}s for {self.config.rollouts_per_example} rollouts")
         return states
 
     async def generate_batch(self, step: int) -> list[vf.State]:
         """Generates a batch of rollouts for training step"""
         self.step = step
+        batch_start = time.perf_counter()
+
         if self.config.max_async_level > 0:  # 0 means disabled
             min_required_step = self.step - self.config.max_async_level
             if self.current_weight_step < min_required_step:
                 await self._wait_for_checkpoint(min_required_step)
 
+        wait_time = time.perf_counter() - batch_start
+
         examples_needed = self.config.batch_size // self.config.rollouts_per_example
         tasks = []
 
+        task_creation_start = time.perf_counter()
         for i in range(examples_needed):
             env = self.envs[i % len(self.envs)]  # round robin across environments
             dataset = env.get_dataset()
             example = random.choice(dataset)
             task = asyncio.create_task(self.schedule_group_rollout(env, example))
             tasks.append(task)
+        task_creation_time = time.perf_counter() - task_creation_start
 
         # wait for all tasks to complete (they run in parallel)
+        gather_start = time.perf_counter()
         results = await asyncio.gather(*tasks)
+        gather_time = time.perf_counter() - gather_start
+
         all_states = []
         for result in results:
             all_states.extend(result)
+
+        total_time = time.perf_counter() - batch_start
+        self.logger.info(
+            f"generate_batch timing: total={total_time:.2f}s, "
+            f"wait_ckpt={wait_time:.2f}s, task_creation={task_creation_time:.3f}s, "
+            f"rollout_gather={gather_time:.2f}s, examples={examples_needed}"
+        )
 
         return all_states
 

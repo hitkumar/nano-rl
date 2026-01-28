@@ -2,6 +2,7 @@
 
 import asyncio
 import random
+import time
 
 import uvloop
 import verifiers as vf
@@ -66,14 +67,38 @@ async def orchestrate(config: OrchestratorConfig) -> None:
 
     step = 0
     max_steps = config.max_steps or float("inf")
+    prefetch_task: asyncio.Task | None = None
+    prefetch_step: int | None = None
+
     try:
         while step < max_steps:
+            step_start = time.perf_counter()
             logger.info(f"Running Step {step}")
-            states = await scheduler.generate_batch(step)
+
+            # Get states from prefetch if available, otherwise generate
+            generate_start = time.perf_counter()
+            if prefetch_task is not None and prefetch_step == step:
+                states = await prefetch_task
+                prefetch_task = None
+                prefetch_step = None
+            else:
+                # Cancel stale prefetch if step doesn't match (e.g., after retry)
+                if prefetch_task is not None:
+                    prefetch_task.cancel()
+                    try:
+                        await prefetch_task
+                    except asyncio.CancelledError:
+                        pass
+                    prefetch_task = None
+                    prefetch_step = None
+                states = await scheduler.generate_batch(step)
+            generate_time = time.perf_counter() - generate_start
+
             if not states:
                 logger.warning(f"Step {step} no valid states generated, retrying")
                 continue
 
+            process_start = time.perf_counter()
             rewards = [s["reward"] for s in states]
             completion_lens = [get_completion_len(s) for s in states]
             # compute advantages in groups of rollouts_per_example
@@ -94,11 +119,22 @@ async def orchestrate(config: OrchestratorConfig) -> None:
                 for s in samples
                 if len(s.completion_ids) + len(s.prompt_ids) <= config.seq_len
             ]
+            process_time = time.perf_counter() - process_start
+
             if not samples:
                 logger.warning(
                     f"Step {step} all samples filtered by seq_len, generate again"
                 )
                 continue
+
+            # Start prefetching next batch before sending current batch
+            # This overlaps next batch generation with trainer processing
+            next_step = step + 1
+            if next_step < max_steps and prefetch_task is None:
+                prefetch_task = asyncio.create_task(
+                    scheduler.generate_batch(next_step)
+                )
+                prefetch_step = next_step
 
             batch = TrainingBatch(
                 examples=samples,
@@ -108,15 +144,30 @@ async def orchestrate(config: OrchestratorConfig) -> None:
             )
 
             # writes batch to a file from where trainer can read it
+            send_start = time.perf_counter()
             batch_save_path = sender.send(batch)
+            send_time = time.perf_counter() - send_start
 
+            total_step_time = time.perf_counter() - step_start
             avg_reward = sum(rewards) / len(rewards)
             logger.info(
                 f"Step {step} wrote {len(samples)} samples at {batch_save_path}, avg_reward={avg_reward:.3f}"
             )
+            logger.info(
+                f"Step {step} timing: total={total_step_time:.2f}s, generate={generate_time:.2f}s, "
+                f"process={process_time:.3f}s, send={send_time:.3f}s"
+            )
             step += 1
 
     finally:
+        # Cancel prefetch task if still running
+        if prefetch_task is not None:
+            prefetch_task.cancel()
+            try:
+                await prefetch_task
+            except asyncio.CancelledError:
+                pass
+
         # stop update_policy_loop
         scheduler.stop()
         update_task.cancel()
