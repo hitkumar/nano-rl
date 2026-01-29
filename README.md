@@ -86,5 +86,11 @@ curl http://localhost:8000/v1/chat/completions \
 
 ## Backlog
 
+### Infrastructure
 - [ ] NCCL broadcast of weights to inference servers
 - [ ] Unified `rl.py` launcher to run full RL loop with one command
+
+### Model Performance
+- [ ] LoRA training support
+- [ ] On-policy distillation (teacher model guidance)
+- [ ] Online difficulty filtering for rollout sampling
