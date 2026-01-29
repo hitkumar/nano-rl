@@ -1,53 +1,90 @@
 # nano-rl
 
-Repo for post training based on prime-RL
-Some useful docs: https://github.com/PrimeIntellect-ai/prime-rl/blob/main/docs/index.md
+Minimal RL post-training framework based on [prime-RL](https://github.com/PrimeIntellect-ai/prime-rl).
 
-***Useful uv commands***
-Install all dependencies from the lock file
+## Setup
+
+Install all dependencies:
+```bash
 uv sync --all-extras
+```
 
-Validate that your uv env is setup correctly
+Validate your environment:
+```bash
 uv run python -c "import torch; print(f'torch {torch.__version__}, CUDA: {torch.cuda.is_available()}')"
+```
 
-Kick off sft training on multiple gpus
-uv run torchrun --nproc-per-node=8 -m nano_rl.trainer.sft.train @ configs/debug/sft/train.toml
-
-single GPU run
-uv run sft @ configs/debug/sft/train.toml
-
-Before running vllm commands, run this, LD library path set
+Before running vLLM commands, set the LD library path:
+```bash
 export LD_PRELOAD=/home/htkumar/nano_rl/.venv/lib/python3.12/site-packages/nvidia/cublas/lib/libcublas.so.12
+```
 
-Starting inference server
+## SFT Training
 
-CUDA_VISIBLE_DEVICES=0,1 uv run python -m nano_rl.inference.server @ configs/debug/infer.toml
+Single GPU:
+```bash
+uv run sft @ configs/debug/sft/train.toml
+```
 
-Or just this
-CUDA_VISIBLE_DEVICES=0,1 uv run inference  @ configs/debug/infer.toml
+Multi-GPU:
+```bash
+uv run torchrun --nproc-per-node=8 -m nano_rl.trainer.sft.train @ configs/debug/sft/train.toml
+```
 
-***Testing inference server***
+## RL Training
 
-curl http://localhost:8000/v1/chat/completions   -H "Content-Type: application/json"   -d '{
-    "model": "/home/htkumar/nano_rl/outputs/weights/step_100",
-    "messages": [{"role": "user", "content": "capital of US!"}],
+RL training requires three components running in parallel:
+
+### 1. Start Inference Server(s)
+
+```bash
+CUDA_VISIBLE_DEVICES=0 uv run inference @ configs/debug/infer.toml --port 8000
+CUDA_VISIBLE_DEVICES=1 uv run inference @ configs/debug/infer.toml --port 8001
+```
+
+### 2. Start Orchestrator
+
+```bash
+uv run orchestrator @ configs/debug/orch.toml
+```
+
+### 3. Start RL Trainer
+
+```bash
+CUDA_VISIBLE_DEVICES=2,3,4,5,6,7 uv run torchrun --nproc_per_node=6 -m nano_rl.trainer.rl.train @ configs/debug/rl.toml
+```
+
+## Evaluation
+
+Run one-off evaluations against a verifiers environment:
+```bash
+uv run vf-eval reverse-text -m Qwen/Qwen3-0.6B -b http://localhost:8000/v1 -n 20 --max-tokens 1024
+```
+
+## Testing
+
+Run integration tests:
+```bash
+uv run pytest tests/integration/test_vf.py -v -s
+```
+
+## Testing Inference Server
+
+```bash
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen/Qwen3-0.6B",
+    "messages": [{"role": "user", "content": "capital of US?"}],
     "max_tokens": 50
   }'
+```
 
-***Run orchestrator***
-First start the inference server and then run this
-uv run orchestrator @ configs/debug/orch.toml
+## Resources
 
-***Running RL***
-Start inference server and then start orchestrator which writes the training batches
+- [prime-RL documentation](https://github.com/PrimeIntellect-ai/prime-rl/blob/main/docs/index.md)
 
-Then run this to start rl training
-CUDA_VISIBLE_DEVICES=1,2,3,4,5,6,7 uv run torchrun --nproc_per_node=7 -m nano_rl.trainer.rl.train @ configs/debug/rl.toml
+## Backlog
 
-***Tests***
-Running integration tests
-uv run pytest tests/integration/test_vf.py -v -s
-
-***Evals***
-For one off evals of a vf environment, start the inference server and then run this
-uv run vf-eval reverse-text -m Qwen/Qwen3-0.6B -b http://localhost:8000/v1 -n 20 --max-tokens 1024
+- [ ] NCCL broadcast of weights to inference servers
+- [ ] Unified `rl.py` launcher to run full RL loop with one command
