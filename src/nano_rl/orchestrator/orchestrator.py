@@ -11,7 +11,7 @@ from nano_rl.orchestrator.config import OrchestratorConfig
 from nano_rl.orchestrator.scheduler import Scheduler
 from nano_rl.orchestrator.utils import set_semaphore
 from nano_rl.transport import setup_training_batch_sender, TrainingBatch, TrainingSample
-from nano_rl.utils.client import check_health, setup_admin_client, setup_client
+from nano_rl.utils.client import check_health, setup_admin_clients, setup_clients
 from nano_rl.utils.logger import get_logger, setup_logger
 from nano_rl.utils.pydantic_config import parse_argv
 from nano_rl.utils.vf import get_completion_len
@@ -46,20 +46,20 @@ async def orchestrate(config: OrchestratorConfig) -> None:
     await set_semaphore(config.max_concurrent)
 
     # used for inference server completions calls
-    client = setup_client(config.client)
+    clients = setup_clients(config.client)
     # used for admin endpoints (eg. health check, update_weights)
-    admin_client = setup_admin_client(config.client)
+    admin_clients = setup_admin_clients(config.client)
 
     sender = setup_training_batch_sender(config.output_dir, config.rollout_transport)
-    logger.info("Waiting for inference server")
-    await check_health(admin_client)
+    logger.info(f"Waiting for {len(clients)} inference server(s)")
+    await check_health(admin_clients)
 
     envs = setup_envs(config)
     if config.seed is not None:
         random.seed(config.seed)
 
     # create scheduler
-    scheduler = Scheduler(config, client, admin_client, envs, sender)
+    scheduler = Scheduler(config, clients, admin_clients, envs, sender)
 
     # start weight polling in background while the main loop runs.
     # Both main task and this one take turns at the await points on the same thread

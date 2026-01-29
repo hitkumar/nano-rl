@@ -53,7 +53,10 @@ class ModelConfig(BaseConfig):
 
 class ClientConfig(BaseConfig):
     # Not adding apikey for now as we assume local inference server
-    base_url: Annotated[str, Field(description="Base URL for inference server.")] = (
-        "http://localhost:8000/v1"
-    )
+    base_url: Annotated[
+        list[str],
+        Field(
+            description="Base URLs for inference servers. If multiple URLs provided, requests will round-robin across servers."
+        ),
+    ] = ["http://localhost:8000/v1"]
     timeout: Annotated[float, Field(description="Request timeout.")] = 1200.0

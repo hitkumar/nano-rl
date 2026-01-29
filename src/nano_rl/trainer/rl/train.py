@@ -242,10 +242,12 @@ def train(config: RlTrainerConfig) -> None:
             step=step,
         )
 
-        # broadcast weights to inference server
-        broadcast_start = time.perf_counter()
-        weight_broadcaster.broadcast_weights(model, step)
-        broadcast_time = time.perf_counter() - broadcast_start
+        # broadcast weights to inference server (every broadcast_interval steps)
+        broadcast_time = 0.0
+        if step > 0 and step % config.broadcast_interval == 0:
+            broadcast_start = time.perf_counter()
+            weight_broadcaster.broadcast_weights(model, step)
+            broadcast_time = time.perf_counter() - broadcast_start
         monitor.log({"time/broadcast": broadcast_time}, step=step)
 
         # save weights at regular intervals

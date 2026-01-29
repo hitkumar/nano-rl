@@ -62,7 +62,7 @@ def config(tmp_path: Path, inference_server) -> OrchestratorConfig:
                 id="reverse-text",
             )
         ],
-        client=ClientConfig(),
+        client=ClientConfig(base_url=["http://localhost:8000/v1"]),
         max_concurrent=4,
     )
 

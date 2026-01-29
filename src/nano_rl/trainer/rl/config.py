@@ -172,6 +172,14 @@ class RlTrainerConfig(BaseSettings):
         ),
     ] = 1
 
+    broadcast_interval: Annotated[
+        int,
+        Field(
+            ge=1,
+            description="Broadcast weights to inference every N steps. Higher values reduce broadcast overhead but increase staleness. Set to 1 to broadcast every step.",
+        ),
+    ] = 1
+
     dist_timeout_seconds: Annotated[
         int,
         Field(
