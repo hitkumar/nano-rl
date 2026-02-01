@@ -56,15 +56,10 @@ def receive_state_dict(
         communicator.broadcast(concatenated, src=0)
         offset = 0
         for key, shape, numel in tensor_info_list:
-            tensor = concatenated[offset : offset + numel].view(shape).clone()
+            # View is safe because vLLM's load_weights() calls param.data.copy_()
+            tensor = concatenated[offset : offset + numel].view(shape)
             offset += numel
-            try:
-                yield key, tensor
-            finally:
-                del tensor
-
-        # Free the concatented buffer after all tensors are extracted.
-        del concatenated
+            yield key, tensor
 
 
 class NCCLWeightBroadcastReceiver:

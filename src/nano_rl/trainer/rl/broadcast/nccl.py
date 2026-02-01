@@ -157,7 +157,7 @@ class NCCLWeightBroadcast(WeightBroadcast):
         return save_dir
 
     def _wait_for_nccl_ready(
-        self, save_dir: Path, interval: float = 0.1, timeout: float = 300
+        self, save_dir: Path, interval: float = 0.01, timeout: float = 300
     ) -> None:
         """
         Wait for inference servers to signal they are ready to receive NCCL broadcast

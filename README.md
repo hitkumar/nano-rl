@@ -80,6 +80,34 @@ curl http://localhost:8000/v1/chat/completions \
   }'
 ```
 
+## Experimental Results
+
+Benchmarks run on 8x A100 GPUs with Qwen3-0.6B model, 4 GPUs for training (FSDP) and 4 GPUs for inference (vLLM).
+
+### Weight Broadcast Methods
+
+| Method | MFU | Throughput | Broadcast Time | Notes |
+|--------|-----|------------|----------------|-------|
+| Filesystem | ~7% | ~15K tok/s | 2.9s | Writes to shared NFS |
+| NCCL | ~11% | ~24K tok/s | 0.5-0.7s | GPU-to-GPU broadcast |
+
+### NCCL Broadcast Performance (batch_size=128, max_async_level=1)
+
+| Metric | Value |
+|--------|-------|
+| MFU | 11.33% ± 0.55% |
+| Throughput | 24.09K ± 1.16K tok/s |
+| Time/Step | 2.09s ± 0.60s |
+| Broadcast Time | 0.67s ± 0.31s |
+| Peak Memory | 69.6 GiB (88%) |
+
+### Bottleneck Analysis
+
+With `max_async_level=1` (required for NCCL), the trainer and orchestrator are tightly coupled:
+- Trainer waits ~0.02s for rollouts normally, spikes to ~1.0s every few steps when buffer is exhausted
+- NCCL broadcast is fast (~0.5s), not the bottleneck
+- Increasing batch size to 160 reduces MFU to ~10% due to longer rollout generation time
+
 ## Resources
 
 - [prime-RL documentation](https://github.com/PrimeIntellect-ai/prime-rl/blob/main/docs/index.md)
