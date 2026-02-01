@@ -21,6 +21,7 @@ from nano_rl.utils.pathing import (
     get_broadcasts_dir,  # output_dir / "broadcasts"
     get_step_path,  # weights_dir / "step_{n}"
     resolve_latest_ckpt_dir,  # Find newest ckpt number
+    wait_for_path,  # Async wait for file to appear
 )
 from nano_rl.utils.vf import generate_group, get_seq_len  # Rollout generation
 from openai import AsyncOpenAI
@@ -107,14 +108,11 @@ class Scheduler:
         self.broadcasts_dir = get_broadcasts_dir(config.output_dir)
 
         # Keep track of current state
-        self.current_weight_step = (
-            -1
-        )  # checkpoint inference server has loaded to generate rollouts, -1 means using base model.
+        self.current_weight_step = 0  # checkpoint step, 0 = base model
         self.step = 0  # training step we are generating rollouts for
         self._stop = False  # shutdown signal
 
-        # async level control; blocks batch generation when inference is too far ahead
-        # Like a boolean flag that coroutines can wait on using event.wait()
+        # Blocks batch generation when waiting for checkpoint
         self.checkpoint_ready = asyncio.Event()
         self.checkpoint_ready.set()
 
@@ -132,22 +130,36 @@ class Scheduler:
         current_weight_step = 3  → "We're USING weights from checkpoint 3"
         async_level = 2       → "Orchestrator is 2 steps AHEAD of trainer"
         """
-        return self.step - max(self.current_weight_step, 0)
+        return self.step - self.current_weight_step
 
     async def _update_policy(self) -> None:
-        """Checks for new broadcast weights and updates if ready"""
+        """Checks for new broadcast weights and updates if ready.
 
-        latest_step = resolve_latest_ckpt_dir(self.broadcasts_dir)
-        if latest_step is not None and latest_step > self.current_weight_step:
-            weights_path = get_step_path(self.broadcasts_dir, latest_step)
+        If orchestrator is too far ahead (async_level > max_async_level),
+        waits for the required checkpoint to appear before updating.
+        """
+        latest_step = resolve_latest_ckpt_dir(self.broadcasts_dir) or 0
+        async_away_step = max(self.step - self.config.max_async_level, 0)
+        next_step = max(async_away_step, latest_step)
+
+        if next_step > self.current_weight_step:
+            # If we need a step that doesn't exist yet, wait for it
+            if next_step == async_away_step and next_step > latest_step:
+                self.logger.info(
+                    f"Waiting for ckpt {next_step} (orchestrator is >{self.config.max_async_level} steps ahead)"
+                )
+                self.checkpoint_ready.clear()
+                stable_path = get_step_path(self.broadcasts_dir, next_step) / "STABLE"
+                await wait_for_path(stable_path, interval=0.1)
+
+            weights_path = get_step_path(self.broadcasts_dir, next_step)
             update_start = time.perf_counter()
             await update_weights(self.admin_clients, weights_path)
             update_time = time.perf_counter() - update_start
-            self.current_weight_step = latest_step
+            self.current_weight_step = next_step
             self.logger.info(
-                f"Updated to weights step: {latest_step} (took {update_time:.2f}s)"
+                f"Updated to weights step: {next_step} (took {update_time:.2f}s)"
             )
-            # possibly unblock batch generation
             self.checkpoint_ready.set()
 
     async def update_policy_loop(self) -> None:
@@ -155,20 +167,6 @@ class Scheduler:
         while not self._stop:
             await self._update_policy()
             await asyncio.sleep(0.5)  # Poll every 500ms
-
-    async def _wait_for_checkpoint(self, required_step: int) -> float:
-        """Wait until a checkpoint at or after required_step is available.
-
-        Returns the time spent waiting.
-        """
-        wait_start = time.perf_counter()
-        while self.current_weight_step < required_step:
-            self.logger.info(
-                f"Waiting for ckpt to become available, currently at {self.current_weight_step}, need {required_step}"
-            )
-            self.checkpoint_ready.clear()  # set this to false
-            await self.checkpoint_ready.wait()
-        return time.perf_counter() - wait_start
 
     def _get_next_client(self) -> AsyncOpenAI:
         """Get next client from round-robin cycle"""
@@ -209,13 +207,9 @@ class Scheduler:
         """Generates a batch of rollouts for training step"""
         self.step = step
         batch_start = time.perf_counter()
-        wait_time = 0.0
 
-        if self.config.max_async_level > 0:  # 0 means disabled
-            min_required_step = self.step - self.config.max_async_level
-            if self.current_weight_step < min_required_step:
-                wait_time = await self._wait_for_checkpoint(min_required_step)
-                self.stats.record_checkpoint_wait(wait_time)
+        # Wait if orchestrator is too far ahead of trainer
+        await self.checkpoint_ready.wait()
 
         examples_needed = self.config.batch_size // self.config.rollouts_per_example
         tasks = []
@@ -243,13 +237,13 @@ class Scheduler:
 
         # Count tokens in this batch for throughput calculation
         batch_tokens = sum(get_seq_len(state) for state in all_states)
-        rollout_time = time.perf_counter() - batch_start - wait_time  # exclude checkpoint wait
+        rollout_time = time.perf_counter() - batch_start
         self.stats.record_batch(batch_time=rollout_time, batch_tokens=batch_tokens)
 
         total_time = time.perf_counter() - batch_start
         self.logger.info(
             f"generate_batch timing: total={total_time:.2f}s, "
-            f"wait_ckpt={wait_time:.2f}s, task_creation={task_creation_time:.3f}s, "
+            f"task_creation={task_creation_time:.3f}s, "
             f"rollout_gather={gather_time:.2f}s, examples={examples_needed}, "
             f"throughput={self.stats.tokens_per_second:.1f} tok/s"
         )

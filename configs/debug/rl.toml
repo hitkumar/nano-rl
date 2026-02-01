@@ -1,8 +1,15 @@
 max_steps = 20
-broadcast_interval = 4
+broadcast_interval = 1
 
 [model]
 seq_len = 8192
 impl = "liger_kernel"
+
+[weight_broadcast]
+type = "nccl"
+host = "localhost"
+port = 29501
+timeout = 1200
+inference_world_size = 4
 
 [ckpt]

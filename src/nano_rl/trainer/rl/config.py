@@ -36,7 +36,40 @@ class FileSystemWeightBroadcastConfig(BaseModel):
     ] = "safetensors"
 
 
-WeightBroadcastConfigType: TypeAlias = FileSystemWeightBroadcastConfig
+class NCCLWeightBroadcastConfig(BaseModel):
+    """
+    Configures weight broadcast via NCCL for direct GPU-to-GPU transfer.
+    Trainer master rank broadcasts weights to all inference server GPU workers.
+    """
+
+    type: Literal["nccl"] = "nccl"
+    host: Annotated[
+        str,
+        Field(description="Host address for the NCCL process group rendezvous."),
+    ] = "localhost"
+    port: Annotated[
+        int,
+        Field(description="Port for the NCCL process group rendezvous."),
+    ] = 29501
+    timeout: Annotated[
+        int,
+        Field(
+            ge=1,
+            description="Timeout in seconds for process group initialization.",
+        ),
+    ] = 1200
+    inference_world_size: Annotated[
+        int,
+        Field(
+            ge=1,
+            description="Total number of inference GPU workers across all servers. For N servers with TP=T each, this is N*T.",
+        ),
+    ] = 1
+
+
+WeightBroadcastConfigType: TypeAlias = (
+    FileSystemWeightBroadcastConfig | NCCLWeightBroadcastConfig
+)
 
 
 class LossConfig(BaseConfig):

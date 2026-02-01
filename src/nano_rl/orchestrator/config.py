@@ -3,12 +3,12 @@ Orchestration config
 """
 
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal, TypeAlias
 
 from nano_rl.transport.config import FileSystemTransportConfig, TransportConfigType
 from nano_rl.utils.config import ClientConfig, LogConfig, ModelConfig
 from nano_rl.utils.pydantic_config import BaseConfig, BaseSettings
-from pydantic import Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 
 class SamplingConfig(BaseConfig):
@@ -94,6 +94,41 @@ class EnvConfig(BaseConfig):
     ] = None
 
 
+class FileSystemWeightBroadcastConfig(BaseModel):
+    """Configures weight broadcast via shared filesystem."""
+
+    type: Literal["filesystem"] = "filesystem"
+
+
+class NCCLWeightBroadcastConfig(BaseModel):
+    """
+    Configures weight broadcast via NCCL for direct GPU-to-GPU transfer.
+    Trainer master rank broadcasts weights to all inference server GPU workers.
+    """
+
+    type: Literal["nccl"] = "nccl"
+    host: Annotated[
+        str,
+        Field(description="Host address for the NCCL process group rendezvous."),
+    ] = "localhost"
+    port: Annotated[
+        int,
+        Field(description="Port for the NCCL process group rendezvous."),
+    ] = 29501
+    timeout: Annotated[
+        int,
+        Field(
+            ge=1,
+            description="Timeout in seconds for process group initialization.",
+        ),
+    ] = 1200
+
+
+WeightBroadcastConfigType: TypeAlias = (
+    FileSystemWeightBroadcastConfig | NCCLWeightBroadcastConfig
+)
+
+
 class OrchestratorConfig(BaseSettings):
     """Conf for orchestrator"""
 
@@ -104,6 +139,9 @@ class OrchestratorConfig(BaseSettings):
     rollout_transport: Annotated[TransportConfigType, Field(discriminator="type")] = (
         FileSystemTransportConfig()
     )
+    weight_broadcast: Annotated[
+        WeightBroadcastConfigType, Field(discriminator="type")
+    ] = FileSystemWeightBroadcastConfig()
     batch_size: Annotated[
         int, Field(ge=1, description="Number of samples to train on per step.")
     ] = 128
@@ -162,4 +200,11 @@ class OrchestratorConfig(BaseSettings):
     def validate_batch_size(self):
         if self.batch_size % self.rollouts_per_example != 0:
             raise ValueError("batch_size must be divisible by rollouts_per_example")
+        return self
+
+    @model_validator(mode="after")
+    def validate_nccl_async_level(self):
+        if self.weight_broadcast.type == "nccl":
+            if self.max_async_level != 1:
+                raise ValueError("max_async_level must be 1 for NCCL broadcast")
         return self

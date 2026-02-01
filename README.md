@@ -51,7 +51,7 @@ uv run orchestrator @ configs/debug/orch.toml
 ### 3. Start RL Trainer
 
 ```bash
-CUDA_VISIBLE_DEVICES=2,3,4,5,6,7 uv run torchrun --nproc_per_node=6 -m nano_rl.trainer.rl.train @ configs/debug/rl.toml
+CUDA_VISIBLE_DEVICES=4,5,6,7 uv run torchrun --nproc_per_node=4 -m nano_rl.trainer.rl.train @ configs/debug/rl.toml
 ```
 
 ## Evaluation
@@ -87,8 +87,9 @@ curl http://localhost:8000/v1/chat/completions \
 ## Backlog
 
 ### Infrastructure
-- [ ] NCCL broadcast of weights to inference servers
+- [x] NCCL broadcast of weights to inference servers
 - [ ] Unified `rl.py` launcher to run full RL loop with one command
+- [ ] ZMQ transport for batches, but doesn't seem very mature right now.
 
 ### Model Performance
 - [ ] LoRA training support

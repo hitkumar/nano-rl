@@ -25,6 +25,28 @@ async def reload_weights(request: Request):
     return {"status": "ok"}
 
 
+@router.post("/init_broadcaster")
+async def init_broadcaster(request: Request):
+    data = await request.json()
+    host = data.get("host")
+    port = data.get("port")
+    server_rank = data.get("server_rank")
+    num_inference_server = data.get("num_inference_server")
+    timeout = data.get("timeout")
+
+    if None in (host, port, server_rank, num_inference_server, timeout):
+        return {
+            "status": "error",
+            "message": "Missing required fields: host, port, server_rank, num_inference_server, timeout",
+        }
+
+    await engine_client(request).collective_rpc(
+        "init_broadcaster",
+        args=(host, port, server_rank, num_inference_server, timeout),
+    )
+    return {"status": "ok"}
+
+
 def main():
     config = parse_argv(InferenceConfig)
     parser = FlexibleArgumentParser(description="nan_rl inference server")

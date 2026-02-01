@@ -11,7 +11,7 @@ from nano_rl.orchestrator.config import OrchestratorConfig
 from nano_rl.orchestrator.scheduler import Scheduler
 from nano_rl.orchestrator.utils import set_semaphore
 from nano_rl.transport import setup_training_batch_sender, TrainingBatch, TrainingSample
-from nano_rl.utils.client import check_health, setup_admin_clients, setup_clients
+from nano_rl.utils.client import check_health, init_nccl_broadcast, setup_admin_clients, setup_clients
 from nano_rl.utils.logger import get_logger, setup_logger
 from nano_rl.utils.pydantic_config import parse_argv
 from nano_rl.utils.vf import get_completion_len
@@ -53,6 +53,16 @@ async def orchestrate(config: OrchestratorConfig) -> None:
     sender = setup_training_batch_sender(config.output_dir, config.rollout_transport)
     logger.info(f"Waiting for {len(clients)} inference server(s)")
     await check_health(admin_clients)
+
+    # Initialize NCCL broadcast if configured
+    if config.weight_broadcast.type == "nccl":
+        logger.info("Initializing NCCL broadcast on inference servers")
+        await init_nccl_broadcast(
+            admin_clients,
+            config.weight_broadcast.host,
+            config.weight_broadcast.port,
+            config.weight_broadcast.timeout,
+        )
 
     envs = setup_envs(config)
     if config.seed is not None:

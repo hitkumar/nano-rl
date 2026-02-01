@@ -11,6 +11,8 @@ from loguru import logger
 from nano_rl.utils.config import ClientConfig
 from openai import AsyncOpenAI
 
+NCCL_READY_MARKER = "NCCL_READY"
+
 
 def setup_clients(client_config: ClientConfig) -> list[AsyncOpenAI]:
     """Create OpenAI clients for all inference servers."""
@@ -77,6 +79,12 @@ async def update_weights(
         response = await admin_client.post("/update_weights", json=body)
         response.raise_for_status()
 
+    if weight_dir is not None:
+        nccl_ready_file = weight_dir / NCCL_READY_MARKER
+        nccl_ready_file.parent.mkdir(parents=True, exist_ok=True)
+        nccl_ready_file.touch()
+        logger.debug(f"Creating nccl ready file at {nccl_ready_file}")
+
     await asyncio.gather(*[_update_weights(client) for client in admin_clients])
     logger.info(f"Updated weights to {weight_dir}")
 
@@ -98,3 +106,40 @@ async def reload_weights(admin_clients: list[AsyncClient]) -> None:
 
     await asyncio.gather(*[_reload_weights(client) for client in admin_clients])
     logger.info("Reloaded weights")
+
+
+async def init_nccl_broadcast(
+    admin_clients: list[AsyncClient], host: str, port: int, timeout: int
+) -> None:
+    """Initialize NCCL broadcast receivers on all inference servers."""
+
+    async def _init_nccl_broadcast(admin_client: AsyncClient, server_rank: int) -> None:
+        try:
+            response = await admin_client.post(
+                "/init_broadcaster",
+                json={
+                    "host": host,
+                    "port": port,
+                    "server_rank": server_rank,
+                    "num_inference_server": len(admin_clients),
+                    "timeout": timeout,
+                },
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.warning(
+                    "The route /init_broadcaster does not exist. Skipping NCCL broadcast initialization."
+                )
+                return
+            raise
+
+    await asyncio.gather(
+        *[
+            _init_nccl_broadcast(admin_client, server_rank)
+            for server_rank, admin_client in enumerate(admin_clients)
+        ]
+    )
+    logger.info(
+        f"Initialized NCCL broadcast on {len(admin_clients)} inference server(s)"
+    )

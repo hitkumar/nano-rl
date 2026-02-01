@@ -243,8 +243,11 @@ def train(config: RlTrainerConfig) -> None:
         )
 
         # broadcast weights to inference server (every broadcast_interval steps)
+        # Skip broadcast on final step with NCCL since orchestrator has finished
         broadcast_time = 0.0
-        if step > 0 and step % config.broadcast_interval == 0:
+        is_final_step = config.max_steps and step >= config.max_steps - 1
+        should_broadcast = step > 0 and step % config.broadcast_interval == 0
+        if should_broadcast and (not is_final_step or config.weight_broadcast.type == "filesystem"):
             broadcast_start = time.perf_counter()
             weight_broadcaster.broadcast_weights(model, step)
             broadcast_time = time.perf_counter() - broadcast_start

@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 from typing import Literal
 
+import torch
 import torch.nn as nn
 from nano_rl.trainer.rl.broadcast.base import WeightBroadcast
 from nano_rl.trainer.rl.config import FileSystemWeightBroadcastConfig
@@ -28,6 +29,7 @@ class FileSystemWeightBroadcast(WeightBroadcast):
             f"Filesystem broadcast initialized (save_format={config.save_format}, save_sharded={self.save_sharded}, keep={self.keep})"
         )
 
+    @torch.no_grad()
     def broadcast_weights(self, model: nn.Module, step: int) -> None:
         """Saves the weights to filesystem and notifies orch, follows similar logic as ckpt.save"""
         start_time = time.perf_counter()
