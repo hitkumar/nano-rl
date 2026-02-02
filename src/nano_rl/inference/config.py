@@ -2,12 +2,12 @@ from argparse import Namespace
 from typing import Annotated, Literal
 
 from nano_rl.utils.pydantic_config import BaseConfig, BaseSettings
-from pydantic import Field
+from pydantic import Field, model_validator
 
 
 class ServerConfig(BaseConfig):
     host: Annotated[str | None, Field(description="The host to run the server on.")] = (
-        None
+        "localhost"
     )
     port: Annotated[int | None, Field(description="The port to run the server on.")] = (
         8000
@@ -62,12 +62,27 @@ class InferenceConfig(BaseSettings):
     model: ModelConfig = ModelConfig()
     parallel: ParallelConfig = ParallelConfig()
     gpu_memory_utilization: Annotated[float, Field(ge=0.0, le=1.0)] = 0.9
+    api_server_count: Annotated[
+        int,
+        Field(
+            ge=1,
+            description="The number of API servers to spawn. Passed to vLLM as `--api-server-count`. "
+            "When using DP, this should match dp to have one API server per DP replica.",
+        ),
+    ] = 1
     seed: Annotated[
         int,
         Field(
             description="Seed the inference components. Passed to vLLM as `--seed`",
         ),
     ] = 0
+
+    @model_validator(mode="after")
+    def auto_setup_api_server_count(self):
+        """Ensure api_server_count matches dp for multi-server setups."""
+        if self.api_server_count < self.parallel.dp:
+            self.api_server_count = self.parallel.dp
+        return self
 
     def to_vllm_args(self) -> Namespace:
         return Namespace(
@@ -81,6 +96,7 @@ class InferenceConfig(BaseSettings):
             tensor_parallel_size=self.parallel.tp,
             data_parallel_size=self.parallel.dp,
             gpu_memory_utilization=self.gpu_memory_utilization,
+            api_server_count=self.api_server_count,
             seed=self.seed,
             # we don't want the raw logits, but actual probabilities
             logprobs_mode="processed_logprobs",

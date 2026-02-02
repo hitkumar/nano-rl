@@ -1,0 +1,39 @@
+# Unified RL launcher config
+# Usage: uv run rl @ configs/debug/rl_unified.toml
+
+output_dir = "outputs/rl"
+max_steps = 20
+seq_len = 8192
+max_async_level = 1
+clean = true
+
+# GPU allocation
+inference_gpu_ids = [0, 1, 2, 3]
+trainer_gpu_ids = [4, 5, 6, 7]
+
+[model]
+name = "Qwen/Qwen3-0.6B"
+
+[weight_broadcast]
+type = "filesystem"
+
+# Trainer-specific overrides
+[trainer]
+broadcast_interval = 1
+gradient_accumulation_steps = 1
+
+# Orchestrator-specific overrides
+[orchestrator]
+batch_size = 160
+rollouts_per_example = 8
+
+[orchestrator.sampling]
+max_tokens = 350
+
+# Inference server config
+[inference]
+gpu_memory_utilization = 0.95
+
+[inference.model]
+max_model_len = 8192
+enforce_eager = false

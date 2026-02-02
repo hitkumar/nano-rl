@@ -91,7 +91,7 @@ class EnvConfig(BaseConfig):
     ] = {}
     name: Annotated[
         str | None, Field(description="Name of the environment to use in logs.")
-    ] = None
+    ] = "reverse-text"
 
 
 class FileSystemWeightBroadcastConfig(BaseModel):
@@ -172,13 +172,6 @@ class OrchestratorConfig(BaseSettings):
             description="Maximum number of steps the inference can be ahead of training. If 0, will degenerate to synchronous on-policy RL. If >=1, training and inference will be overlapped.",
         ),
     ] = 1
-    max_off_policy_steps: Annotated[
-        int,
-        Field(
-            ge=0,
-            description="Maximum number of policies that are allowed to generate a single rollout. Rollouts that are generated from more than `max_off_policy_steps` steps ahead of training will be discarded. Higher values yield better throughput, but lead to more off-policyness in training.",
-        ),
-    ] = 8
     output_dir: Annotated[
         Path,
         Field(

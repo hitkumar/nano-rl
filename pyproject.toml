@@ -20,6 +20,7 @@ dependencies = [
     "pydantic>=1.10.13",
     "pydantic-settings>=2.10.1",
     "tomli>=2.2.1",
+    "tomli-w>=1.0.0",
 
     # Type checking
     "beartype>=0.21.0",
@@ -42,7 +43,8 @@ dependencies = [
 sft = "nano_rl.trainer.sft.train:main"
 inference = "nano_rl.inference.server:main"
 orchestrator = "nano_rl.orchestrator.orchestrator:main"
-rl = "nano_rl.trainer.rl.train:main"
+rl-train = "nano_rl.trainer.rl.train:main"
+rl = "nano_rl.rl:main"
 
 [project.optional-dependencies]
 flash-attn = [

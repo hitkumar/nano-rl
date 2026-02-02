@@ -3,9 +3,28 @@ from fastapi import Request
 
 from nano_rl.inference.config import InferenceConfig
 from nano_rl.utils.pydantic_config import parse_argv
+from vllm.entrypoints.cli.serve import (
+    run_api_server_worker_proc as _original_run_api_server_worker_proc,
+    run_multi_api_server,
+)
 from vllm.entrypoints.openai.api_server import engine_client, router, run_server
 from vllm.entrypoints.openai.cli_args import make_arg_parser, validate_parsed_serve_args
 from vllm.utils.argparse_utils import FlexibleArgumentParser
+
+
+def _custom_run_api_server_worker_proc(
+    listen_address, sock, args, client_config=None, **uvicorn_kwargs
+) -> None:
+    """Re-import this module in child processes to register custom routes."""
+    import nano_rl.inference.server  # noqa: F401
+
+    _original_run_api_server_worker_proc(listen_address, sock, args, client_config, **uvicorn_kwargs)
+
+
+# Monkey-patch to ensure custom routes work in multi-API-server mode
+import vllm.entrypoints.cli.serve
+
+vllm.entrypoints.cli.serve.run_api_server_worker_proc = _custom_run_api_server_worker_proc
 
 
 @router.post("/update_weights")
@@ -56,7 +75,11 @@ def main():
 
     # set worker extension
     args.worker_extension_cls = "nano_rl.inference.worker.WeightUpdateWorker"
-    uvloop.run(run_server(args))
+
+    if args.api_server_count > 1:
+        run_multi_api_server(args)
+    else:
+        uvloop.run(run_server(args))
 
 
 if __name__ == "__main__":

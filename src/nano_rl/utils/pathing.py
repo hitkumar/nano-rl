@@ -1,4 +1,5 @@
 import asyncio
+import tempfile
 import time
 from pathlib import Path
 
@@ -52,3 +53,12 @@ def sync_wait_for_path(path: Path, interval: float = 1.0) -> None:
 async def wait_for_path(path: Path, interval: float = 1.0) -> None:
     while not path.exists():
         await asyncio.sleep(interval)
+
+
+def get_temp_toml_file() -> Path:
+    """Create a temporary TOML file and return its path."""
+    fd, path = tempfile.mkstemp(suffix=".toml")
+    # Close the file descriptor, we just need the path
+    import os
+    os.close(fd)
+    return Path(path)
