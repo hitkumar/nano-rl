@@ -276,15 +276,19 @@ class RLConfig(BaseSettings):
 
     @model_validator(mode="after")
     def auto_setup_orchestrator_client(self):
-        """Auto-configure orchestrator client URL based on inference config.
+        """Auto-configure orchestrator client URLs based on inference config.
 
-        Note: vLLM's run_multi_api_server uses SO_REUSEPORT to have all API
-        server processes share the same port. The kernel handles load balancing.
+        Creates one URL per DP replica, each on a different port, allowing
+        the orchestrator to address each inference server individually for
+        weight updates.
         """
         if self.inference is not None:
-            port = self.inference.server.port or 8000
+            base_port = self.inference.server.port or 8000
             host = self.inference.server.host or "localhost"
-            self.orchestrator.client.base_url = [f"http://{host}:{port}/v1"]
+            dp = self.inference.parallel.dp
+            self.orchestrator.client.base_url = [
+                f"http://{host}:{base_port + dp_rank}/v1" for dp_rank in range(dp)
+            ]
         return self
 
     # =========================================================================

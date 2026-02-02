@@ -15,7 +15,7 @@ trainer_gpu_ids = [4, 5, 6, 7]
 name = "Qwen/Qwen3-0.6B"
 
 [weight_broadcast]
-type = "filesystem"
+type = "nccl"
 
 # Trainer-specific overrides
 [trainer]

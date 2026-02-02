@@ -5,7 +5,6 @@ Unified RL launcher that does inference, training, and orchestrator.
 import os
 import shutil
 import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -13,6 +12,7 @@ import tomli_w
 from nano_rl.rl_config import RLConfig
 from nano_rl.utils.logger import get_logger, setup_logger
 from nano_rl.utils.pathing import (
+    get_broadcasts_dir,
     get_logs_dir,
     get_rollout_dir,
     get_temp_toml_file,
@@ -22,10 +22,11 @@ from nano_rl.utils.pydantic_config import parse_argv
 
 
 def clean_directories(config: RLConfig) -> None:
-    """Removes rollouts, weights and logs directories if clean is True"""
+    """Removes rollouts, weights, broadcasts and logs directories if clean is True"""
     dirs_to_clean = [
         get_rollout_dir(config.output_dir),
         get_weights_dir(config.output_dir),
+        get_broadcasts_dir(config.output_dir),
         get_logs_dir(config.output_dir),
     ]
     for d in dirs_to_clean:
@@ -47,18 +48,41 @@ def build_env_with_gpus(gpu_ids: list[int]) -> dict:
     return env
 
 
-def start_inference_server(config: RLConfig, log_dir: Path) -> subprocess.Popen | None:
-    """Start the inference server subprocess."""
+def start_inference_servers(config: RLConfig, log_dir: Path) -> list[subprocess.Popen]:
+    """Start separate inference server subprocesses, one per DP replica.
+
+    Each server runs on a different port and GPU set, allowing individual
+    addressing for weight updates (unlike SO_REUSEPORT which shares a port).
+    """
     if config.inference is None:
-        return None
+        return []
 
-    inference_dict = config.inference.model_dump(exclude_none=True, mode="json")
-    config_path = write_component_config(inference_dict)
+    processes = []
+    base_port = config.inference.server.port or 8000
+    tp = config.inference.parallel.tp
+    dp = config.inference.parallel.dp
 
-    cmd = ["uv", "run", "inference", "@", str(config_path)]
-    env = build_env_with_gpus(config.inference_gpu_ids)
-    log_file = open(log_dir / "inference.log", "w")
-    return subprocess.Popen(cmd, env=env, stdout=log_file, stderr=subprocess.STDOUT)
+    for dp_rank in range(dp):
+        # Calculate GPU IDs for this DP replica
+        start_idx = dp_rank * tp
+        end_idx = start_idx + tp
+        gpu_ids = config.inference_gpu_ids[start_idx:end_idx]
+
+        # Create config for this server instance
+        inference_dict = config.inference.model_dump(exclude_none=True, mode="json")
+        inference_dict["server"]["port"] = base_port + dp_rank
+        inference_dict["parallel"]["dp"] = 1  # Each server is a single DP replica
+        inference_dict["api_server_count"] = 1  # Single API server per process
+
+        config_path = write_component_config(inference_dict)
+        cmd = ["uv", "run", "inference", "@", str(config_path)]
+        env = build_env_with_gpus(gpu_ids)
+
+        log_file = open(log_dir / f"inference_{dp_rank}.log", "w")
+        proc = subprocess.Popen(cmd, env=env, stdout=log_file, stderr=subprocess.STDOUT)
+        processes.append(proc)
+
+    return processes
 
 
 def start_orchestrator(config: RLConfig, log_dir: Path) -> subprocess.Popen:
@@ -100,31 +124,31 @@ def start_trainer(config: RLConfig, log_dir: Path) -> subprocess.Popen:
 
 
 def wait_for_inference_ready(config: RLConfig, timeout: float = 120) -> None:
-    """Wait for inference server endpoint to be ready.
-
-    Note: vLLM's run_multi_api_server uses SO_REUSEPORT so all API server
-    processes share the same port. We only need to check the single port.
-    """
+    """Wait for all inference server endpoints to be ready."""
     import urllib.error
     import urllib.request
 
     if config.inference is None:
         return
 
-    port = config.inference.server.port or 8000
+    base_port = config.inference.server.port or 8000
     host = config.inference.server.host or "localhost"
-    url = f"http://{host}:{port}/health"
+    dp = config.inference.parallel.dp
 
     start = time.time()
-    while time.time() - start < timeout:
-        try:
-            urllib.request.urlopen(url, timeout=1)
-            print(f"Inference server {url} is ready")
-            return
-        except (urllib.error.URLError, ConnectionRefusedError):
-            time.sleep(1)
+    for dp_rank in range(dp):
+        port = base_port + dp_rank
+        url = f"http://{host}:{port}/health"
 
-    raise TimeoutError(f"Timeout waiting for inference server {url} to be ready")
+        while time.time() - start < timeout:
+            try:
+                urllib.request.urlopen(url, timeout=1)
+                print(f"Inference server {url} is ready")
+                break
+            except (urllib.error.URLError, ConnectionRefusedError):
+                time.sleep(1)
+        else:
+            raise TimeoutError(f"Timeout waiting for inference server {url} to be ready")
 
 
 def cleanup_processes(processes: list[subprocess.Popen]) -> None:
@@ -154,10 +178,10 @@ def main() -> None:
     processes: list[subprocess.Popen] = []
 
     try:
-        logger.info("Starting inference server")
-        inference_proc = start_inference_server(config, log_dir)
-        if inference_proc:
-            processes.append(inference_proc)
+        logger.info("Starting inference servers")
+        inference_procs = start_inference_servers(config, log_dir)
+        if inference_procs:
+            processes.extend(inference_procs)
             wait_for_inference_ready(config)
         else:
             logger.info("No inference config, assuming external server")
