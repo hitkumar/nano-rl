@@ -11,6 +11,7 @@ from pathlib import Path
 from threading import Event, Thread
 
 import tomli_w
+import pynvml
 from nano_rl.rl_config import RLConfig
 from nano_rl.utils.logger import get_logger, setup_logger
 from nano_rl.utils.pathing import (
@@ -21,6 +22,24 @@ from nano_rl.utils.pathing import (
     get_weights_dir,
 )
 from nano_rl.utils.pydantic_config import parse_argv
+
+
+def check_gpus_available(gpu_ids: list[int]) -> None:
+    """Raise error if there are existing processes on the specified GPUs."""
+    pynvml.nvmlInit()
+    occupied = []
+    for gpu_id in gpu_ids:
+        handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_id)
+        processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+        if processes:
+            pids = [p.pid for p in processes]
+            occupied.append((gpu_id, pids))
+    if occupied:
+        msg = "Existing processes found on GPUs:\n"
+        for gpu_id, pids in occupied:
+            msg += f"  GPU {gpu_id}: PIDs {pids}\n"
+        msg += "Kill these processes or use different GPUs."
+        raise RuntimeError(msg)
 
 
 def clean_directories(config: RLConfig) -> None:
@@ -226,6 +245,17 @@ def main() -> None:
         log_file=(log_dir / "rl.log"),
     )
     logger = get_logger()
+
+    all_gpu_ids = list(set(config.inference_gpu_ids + config.trainer_gpu_ids))
+    check_gpus_available(all_gpu_ids)
+
+    overlap = set(config.inference_gpu_ids) & set(config.trainer_gpu_ids)
+    if overlap:
+        raise ValueError(
+            f"Inference and trainer GPU IDs overlap: {sorted(overlap)}. "
+            f"They must use separate GPUs."
+        )
+
     processes: list[subprocess.Popen] = []
     monitor_threads: list[Thread] = []
     error_queue: list[Exception] = []
