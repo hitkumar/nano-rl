@@ -160,7 +160,7 @@ class NCCLWeightBroadcast(WeightBroadcast):
         self, save_dir: Path, interval: float = 0.01, timeout: float = 300
     ) -> None:
         """
-        Wait for inference servers to signal they are ready to receive NCCL broadcast
+        Wait for inference servers to signal they are ready to receive NCCL broadcast.
         The flow is:
         1. Trainer touches STABLE
         2. Orchestrator sees STABLE, calls /update_weights on inference servers

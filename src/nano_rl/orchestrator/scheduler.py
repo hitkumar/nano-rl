@@ -112,10 +112,6 @@ class Scheduler:
         self.step = 0  # training step we are generating rollouts for
         self._stop = False  # shutdown signal
 
-        # Blocks batch generation when waiting for checkpoint
-        self.checkpoint_ready = asyncio.Event()
-        self.checkpoint_ready.set()
-
         self.logger.info(
             f"Scheduler initialized with {len(clients)} inference client(s)"
         )
@@ -135,32 +131,21 @@ class Scheduler:
     async def _update_policy(self) -> None:
         """Checks for new broadcast weights and updates if ready.
 
-        If orchestrator is too far ahead (async_level > max_async_level),
-        waits for the required checkpoint to appear before updating.
+        Jumps to the latest available checkpoint. For NCCL broadcast this is
+        always sequential (trainer blocks on each broadcast), for filesystem
+        it can skip intermediate steps.
         """
         latest_step = resolve_latest_ckpt_dir(self.broadcasts_dir) or 0
-        async_away_step = max(self.step - self.config.max_async_level, 0)
-        next_step = max(async_away_step, latest_step)
 
-        if next_step > self.current_weight_step:
-            # If we need a step that doesn't exist yet, wait for it
-            if next_step == async_away_step and next_step > latest_step:
-                self.logger.info(
-                    f"Waiting for ckpt {next_step} (orchestrator is >{self.config.max_async_level} steps ahead)"
-                )
-                self.checkpoint_ready.clear()
-                stable_path = get_step_path(self.broadcasts_dir, next_step) / "STABLE"
-                await wait_for_path(stable_path, interval=0.1)
-
-            weights_path = get_step_path(self.broadcasts_dir, next_step)
+        if latest_step > self.current_weight_step:
+            weights_path = get_step_path(self.broadcasts_dir, latest_step)
             update_start = time.perf_counter()
             await update_weights(self.admin_clients, weights_path)
             update_time = time.perf_counter() - update_start
-            self.current_weight_step = next_step
+            self.current_weight_step = latest_step
             self.logger.info(
-                f"Updated to weights step: {next_step} (took {update_time:.2f}s)"
+                f"Updated to weights step: {latest_step} (took {update_time:.2f}s)"
             )
-            self.checkpoint_ready.set()
 
     async def update_policy_loop(self) -> None:
         """Poll for new weights and update inference server"""
@@ -209,7 +194,8 @@ class Scheduler:
         batch_start = time.perf_counter()
 
         # Wait if orchestrator is too far ahead of trainer
-        await self.checkpoint_ready.wait()
+        while self.async_level > self.config.max_async_level:
+            await asyncio.sleep(0.1)
 
         examples_needed = self.config.batch_size // self.config.rollouts_per_example
         tasks = []
