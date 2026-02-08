@@ -6,7 +6,6 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from huggingface_hub import snapshot_download
-from liger_kernel.transformers import AutoLigerKernelForCausalLM
 from nano_rl.trainer.config import ModelConfig, TokenizerConfig
 from nano_rl.trainer.parallel_dims import ParallelDims
 from nano_rl.utils.logger import get_logger
@@ -43,8 +42,6 @@ def get_model(
         match config.impl:
             case "hf":
                 model_cls = AutoModelForCausalLM
-            case "liger_kernel":
-                model_cls = AutoLigerKernelForCausalLM
             case _:
                 raise ValueError(f"Unknown model implementation: {config.impl}")
 

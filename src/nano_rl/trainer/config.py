@@ -129,7 +129,7 @@ class ModelConfig(BaseConfig):
     ] = False
 
     impl: Annotated[
-        Literal["hf", "liger_kernel", "custom"],
+        Literal["hf"],
         Field(description="The implementation to use for the model."),
     ] = "hf"
 
