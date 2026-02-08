@@ -47,14 +47,14 @@ uv run vf-eval reverse-text -m outputs/rl/weights/step_100 -b http://localhost:8
 
 ## Results
 
-### SFT Benchmarks (Qwen3-0.6B, batch_size=192, seq_len=4096, torch.compile)
+### SFT Benchmarks (Qwen3-0.6B, batch_size=192, seq_len=4096)
 
-| Metric | Value |
-|--------|-------|
-| MFU | 40.74% ± 0.77% |
-| Throughput | 228.17K ± 4.29K tok/s |
-| Time/Step | 3.15s ± 0.09s |
-| Peak Memory | 44.2 GiB (55.9%) |
+| Config | MFU | Throughput | Time/Step | Peak Memory |
+|--------|-----|------------|-----------|-------------|
+| torch.compile | 40.74% | 228.17K tok/s | 3.15s | 44.2 GiB (55.9%) |
+| torch.compile + AC | 21.76% | 121.85K tok/s | 6.46s | — |
+
+Activation checkpointing trades compute for memory. Not recommended for Qwen3-0.6B on A100 since memory is not the bottleneck.
 
 ### RL Reward Progression
 

@@ -16,3 +16,6 @@ lr = 2e-5
 
 [model.compile]
 fullgraph = false
+
+# [model.ac]
+# freq = 1

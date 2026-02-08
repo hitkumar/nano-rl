@@ -6,7 +6,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from huggingface_hub import snapshot_download
-from nano_rl.trainer.config import CompileConfig, ModelConfig, TokenizerConfig
+from nano_rl.trainer.config import ActivationCheckpointConfig, CompileConfig, ModelConfig, TokenizerConfig
 from nano_rl.trainer.parallel_dims import ParallelDims
 from nano_rl.utils.logger import get_logger
 from torch.distributed.checkpoint.hf_storage import HuggingFaceStorageReader
@@ -17,6 +17,7 @@ from torch.distributed.fsdp import (
     MixedPrecisionPolicy,
     OffloadPolicy,
 )
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import checkpoint_wrapper
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 from transformers.tokenization_utils import PreTrainedTokenizer
 
@@ -112,6 +113,16 @@ def load_dcp_from_hf(model: nn.Module, config: ModelConfig) -> None:
     )
 
 
+def apply_ac(model: nn.Module, ac_config: ActivationCheckpointConfig) -> None:
+    """Apply activation checkpointing to transformer layers."""
+    logger = get_logger()
+    for layer_id, (layer_name, transformer_block) in enumerate(model.model.layers.named_children()):
+        if layer_id % ac_config.freq == 0:
+            transformer_block = checkpoint_wrapper(transformer_block, preserve_rng_state=False)
+        model.model.layers.register_module(layer_name, transformer_block)
+    logger.info(f"Applied activation checkpointing (freq={ac_config.freq})")
+
+
 def apply_compile(model: nn.Module, compile_config: CompileConfig) -> None:
     """Compile each transformer layer individually with torch.compile."""
     torch._dynamo.config.capture_scalar_outputs = True
@@ -127,7 +138,9 @@ def setup_model(config: ModelConfig, parallel_dims: ParallelDims) -> nn.Module:
         config, device=torch.device("meta"), dtype=DTYPE_MAP[config.optimization_dtype]
     )
 
-    # compile before FSDP
+    # AC -> Compile -> FSDP (order matters)
+    if config.ac is not None:
+        apply_ac(model, config.ac)
     if config.compile is not None:
         apply_compile(model, config.compile)
 

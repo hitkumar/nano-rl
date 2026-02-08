@@ -140,6 +140,7 @@ With `max_async_level=1` (required for NCCL), the trainer and orchestrator are t
 - [ ] ZMQ transport for batches, but doesn't seem very mature right now.
 
 ### Model Performance
+- [ ] Fused chunked LM head for RL (avoids materializing full [N, vocab] logits tensor)
 - [ ] LoRA training support
 - [ ] On-policy distillation (teacher model guidance)
 - [ ] Online difficulty filtering for rollout sampling
