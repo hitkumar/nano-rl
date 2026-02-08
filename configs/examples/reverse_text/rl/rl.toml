@@ -1,0 +1,45 @@
+# Unified RL config for reverse_text experiment
+# Usage: uv run rl @ configs/examples/reverse_text/rl/rl.toml
+
+output_dir = "outputs/rl"
+max_steps = 100
+seq_len = 2048
+max_async_level = 1
+clean = true
+
+# GPU allocation (8 GPUs: 4 inference, 4 training)
+inference_gpu_ids = [0, 1, 2, 3]
+trainer_gpu_ids = [4, 5, 6, 7]
+
+[model]
+# SFT model as starting point
+name = "outputs/sft/weights/step_100"
+
+[weight_broadcast]
+type = "nccl"
+
+[ckpt]
+interval = 20
+
+[trainer]
+broadcast_interval = 1
+
+[trainer.optim]
+lr = 3e-6
+
+[orchestrator]
+batch_size = 384
+rollouts_per_example = 16
+
+[orchestrator.sampling]
+max_tokens = 128
+
+[[orchestrator.env]]
+id = "reverse_text"
+
+[inference]
+gpu_memory_utilization = 0.95
+
+[inference.model]
+max_model_len = 2048
+enforce_eager = false
