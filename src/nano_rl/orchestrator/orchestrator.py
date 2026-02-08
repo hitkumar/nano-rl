@@ -178,13 +178,10 @@ async def orchestrate(config: OrchestratorConfig) -> None:
             except asyncio.CancelledError:
                 pass
 
-        # stop update_policy_loop
-        scheduler.stop()
-        update_task.cancel()
-        try:
-            await update_task
-        except asyncio.CancelledError:
-            pass
+        # Keep update_policy_loop running so it can continue relaying
+        # weight updates to inference servers. The orchestrator process
+        # stays alive until the launcher kills it after the trainer exits.
+        await update_task
 
 
 def main():

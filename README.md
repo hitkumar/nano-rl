@@ -33,22 +33,42 @@ uv run torchrun --nproc-per-node=8 -m nano_rl.trainer.sft.train @ configs/debug/
 
 ## RL Training
 
-RL training requires three components running in parallel:
+### Unified Launcher
 
-### 1. Start Inference Server(s)
+The simplest way to run RL training is with the unified launcher, which starts all three components (inference servers, orchestrator, trainer) as subprocesses with a single command:
+
+```bash
+uv run rl @ configs/debug/rl_unified.toml
+```
+
+The config file controls GPU allocation, model, weight broadcast method, and all component-specific settings. Trainer logs are streamed to the terminal in real-time. See `configs/debug/rl_unified.toml` for an example config.
+
+You can override any config value from the command line:
+
+```bash
+uv run rl @ configs/debug/rl_unified.toml --max_steps 100 --orchestrator.batch_size 256
+```
+
+Logs for all components are written to `<output_dir>/logs/`.
+
+### Manual Setup
+
+Alternatively, you can start each component separately, which is useful for debugging or running components on different machines.
+
+#### 1. Start Inference Server(s)
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 uv run inference @ configs/debug/infer.toml --port 8000
 CUDA_VISIBLE_DEVICES=1 uv run inference @ configs/debug/infer.toml --port 8001
 ```
 
-### 2. Start Orchestrator
+#### 2. Start Orchestrator
 
 ```bash
 uv run orchestrator @ configs/debug/orch.toml
 ```
 
-### 3. Start RL Trainer
+#### 3. Start RL Trainer
 
 ```bash
 CUDA_VISIBLE_DEVICES=4,5,6,7 uv run torchrun --nproc_per_node=4 -m nano_rl.trainer.rl.train @ configs/debug/rl.toml

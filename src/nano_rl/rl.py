@@ -5,8 +5,10 @@ Unified RL launcher that does inference, training, and orchestrator.
 import os
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
+from threading import Event, Thread
 
 import tomli_w
 from nano_rl.rl_config import RLConfig
@@ -100,8 +102,8 @@ def start_orchestrator(config: RLConfig, log_dir: Path) -> subprocess.Popen:
     )
 
 
-def start_trainer(config: RLConfig, log_dir: Path) -> subprocess.Popen:
-    """Start the trainer subprocess."""
+def start_trainer(config: RLConfig, log_dir: Path) -> tuple[subprocess.Popen, Path]:
+    """Start the trainer subprocess. Returns (process, log_file_path)."""
     trainer_dict = config.trainer.model_dump(exclude_none=True, mode="json")
     config_path = write_component_config(trainer_dict)
 
@@ -119,8 +121,10 @@ def start_trainer(config: RLConfig, log_dir: Path) -> subprocess.Popen:
     ]
     env = build_env_with_gpus(config.trainer_gpu_ids)
     env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-    log_file = open(log_dir / "trainer.log", "w")
-    return subprocess.Popen(cmd, env=env, stdout=log_file, stderr=subprocess.STDOUT)
+    trainer_log_path = log_dir / "trainer.log"
+    log_file = open(trainer_log_path, "w")
+    proc = subprocess.Popen(cmd, env=env, stdout=log_file, stderr=subprocess.STDOUT)
+    return proc, trainer_log_path
 
 
 def wait_for_inference_ready(config: RLConfig, timeout: float = 120) -> None:
@@ -148,7 +152,9 @@ def wait_for_inference_ready(config: RLConfig, timeout: float = 120) -> None:
             except (urllib.error.URLError, ConnectionRefusedError):
                 time.sleep(1)
         else:
-            raise TimeoutError(f"Timeout waiting for inference server {url} to be ready")
+            raise TimeoutError(
+                f"Timeout waiting for inference server {url} to be ready"
+            )
 
 
 def cleanup_processes(processes: list[subprocess.Popen]) -> None:
@@ -161,6 +167,51 @@ def cleanup_processes(processes: list[subprocess.Popen]) -> None:
             p.wait(timeout=10)
         except subprocess.TimeoutExpired:
             p.kill()
+
+
+def cleanup_threads(threads: list[Thread]) -> None:
+    """Wait for all monitor threads to finish."""
+    for thread in threads:
+        thread.join(timeout=5)
+
+
+def monitor_process(
+    process: subprocess.Popen,
+    stop_event: Event,
+    error_queue: list[Exception],
+    process_name: str,
+) -> None:
+    """Monitor a subprocess in a daemon thread.
+
+    Blocks on process.wait() until the subprocess exits.
+    If non-zero exit code, appends an error to the shared error_queue.
+    Always sets stop_event so the main loop knows this process is done.
+    """
+    process.wait()
+    if process.returncode != 0:
+        error_queue.append(
+            RuntimeError(f"{process_name} failed with exit code {process.returncode}")
+        )
+    stop_event.set()
+
+
+def start_monitor_thread(
+    process: subprocess.Popen,
+    name: str,
+    stop_events: dict[str, Event],
+    error_queue: list[Exception],
+    monitor_threads: list[Thread],
+) -> None:
+    """Spawn a daemon thread that watches a subprocess for exit."""
+    stop_event = Event()
+    stop_events[name] = stop_event
+    thread = Thread(
+        target=monitor_process,
+        args=(process, stop_event, error_queue, name),
+        daemon=True,
+    )
+    thread.start()
+    monitor_threads.append(thread)
 
 
 def main() -> None:
@@ -176,12 +227,19 @@ def main() -> None:
     )
     logger = get_logger()
     processes: list[subprocess.Popen] = []
+    monitor_threads: list[Thread] = []
+    error_queue: list[Exception] = []
+    stop_events: dict[str, Event] = {}
 
     try:
         logger.info("Starting inference servers")
         inference_procs = start_inference_servers(config, log_dir)
         if inference_procs:
             processes.extend(inference_procs)
+            for i, proc in enumerate(inference_procs):
+                start_monitor_thread(
+                    proc, f"inference_{i}", stop_events, error_queue, monitor_threads
+                )
             wait_for_inference_ready(config)
         else:
             logger.info("No inference config, assuming external server")
@@ -189,21 +247,48 @@ def main() -> None:
         logger.info("Starting orchestrator")
         orch_process = start_orchestrator(config, log_dir)
         processes.append(orch_process)
+        start_monitor_thread(
+            orch_process, "orchestrator", stop_events, error_queue, monitor_threads
+        )
 
-        train_process = start_trainer(config, log_dir)
+        train_process, trainer_log_path = start_trainer(config, log_dir)
         processes.append(train_process)
+        start_monitor_thread(
+            train_process, "trainer", stop_events, error_queue, monitor_threads
+        )
 
-        logger.info("All processes started, waiting for trainer to finish")
+        logger.info("All processes started, showing trainer logs...")
 
-        # waiting for trainer to finish as that is the main workload
-        train_process.wait()
+        # Tail trainer logs to terminal so the user sees progress
+        tail_process = subprocess.Popen(["tail", "-F", str(trainer_log_path)])
+        processes.append(tail_process)
 
-        logger.info("Training done")
+        # Poll for errors until trainer exits.
+        # Orchestrator never exits on its own (update_policy_loop keeps it alive),
+        # but if it crashes, error_queue catches it.
+        while not stop_events["trainer"].is_set():
+            if error_queue:
+                logger.error(f"Process error: {error_queue[0]}")
+                cleanup_threads(monitor_threads)
+                cleanup_processes(processes)
+                sys.exit(1)
+            time.sleep(1)
+
+        # Check if trainer failed with an error
+        if error_queue:
+            logger.error(f"Process error: {error_queue[0]}")
+            cleanup_threads(monitor_threads)
+            cleanup_processes(processes)
+            sys.exit(1)
+
+        logger.info("Training finished")
+
     except KeyboardInterrupt:
         logger.info("Keyboard interrupt, terminating processes")
     except Exception as e:
         logger.exception("Exception occurred, terminating processes")
     finally:
+        cleanup_threads(monitor_threads)
         cleanup_processes(processes)
 
 
