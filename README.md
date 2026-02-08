@@ -136,7 +136,7 @@ With `max_async_level=1` (required for NCCL), the trainer and orchestrator are t
 
 ### Infrastructure
 - [x] NCCL broadcast of weights to inference servers
-- [ ] Unified `rl.py` launcher to run full RL loop with one command
+- [x] Unified `rl.py` launcher to run full RL loop with one command
 - [ ] ZMQ transport for batches, but doesn't seem very mature right now.
 
 ### Model Performance

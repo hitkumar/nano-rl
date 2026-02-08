@@ -315,8 +315,10 @@ def main() -> None:
 
     except KeyboardInterrupt:
         logger.info("Keyboard interrupt, terminating processes")
+        sys.exit(1)
     except Exception as e:
         logger.exception("Exception occurred, terminating processes")
+        sys.exit(1)
     finally:
         cleanup_threads(monitor_threads)
         cleanup_processes(processes)

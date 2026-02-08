@@ -7,6 +7,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
+import torch
+
 
 class Monitor(ABC):
     """
@@ -47,6 +49,11 @@ class FilesystemMonitor(Monitor):
         """
         if step is not None:
             metrics["step"] = step
+        # Convert tensors to Python scalars for JSON serialization
+        metrics = {
+            k: v.item() if isinstance(v, torch.Tensor) else v
+            for k, v in metrics.items()
+        }
         self.history.append(metrics)
 
     def save_json(self) -> None:
