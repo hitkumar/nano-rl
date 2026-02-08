@@ -47,6 +47,17 @@ uv run vf-eval reverse-text -m outputs/rl/weights/step_100 -b http://localhost:8
 
 ## Results
 
+### SFT Benchmarks (Qwen3-0.6B, batch_size=192, seq_len=4096, torch.compile)
+
+| Metric | Value |
+|--------|-------|
+| MFU | 40.74% ± 0.77% |
+| Throughput | 228.17K ± 4.29K tok/s |
+| Time/Step | 3.15s ± 0.09s |
+| Peak Memory | 44.2 GiB (55.9%) |
+
+### RL Reward Progression
+
 | Stage | Avg Reward |
 |-------|-----------|
 | Base model (Qwen3-0.6B) | 0.063 |

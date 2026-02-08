@@ -153,6 +153,12 @@ def train(config: SFTTrainerConfig) -> None:
         peak_memory = torch.cuda.max_memory_allocated() / 1024**3  # convert to GiB
 
         step_time = time.perf_counter() - start_time
+        if step % 10 == 0:
+            log0(
+                f"Step {step} | Loss {batch_loss.item():.4f} | "
+                f"MFU {mfu:.2f}% | Throughput {throughput:.0f} tok/s | "
+                f"Time {step_time:.2f}s"
+            )
         monitor.log(
             {
                 "loss/mean": batch_loss.mean(),

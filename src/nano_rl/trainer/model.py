@@ -6,7 +6,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from huggingface_hub import snapshot_download
-from nano_rl.trainer.config import ModelConfig, TokenizerConfig
+from nano_rl.trainer.config import CompileConfig, ModelConfig, TokenizerConfig
 from nano_rl.trainer.parallel_dims import ParallelDims
 from nano_rl.utils.logger import get_logger
 from torch.distributed.checkpoint.hf_storage import HuggingFaceStorageReader
@@ -112,11 +112,25 @@ def load_dcp_from_hf(model: nn.Module, config: ModelConfig) -> None:
     )
 
 
+def apply_compile(model: nn.Module, compile_config: CompileConfig) -> None:
+    """Compile each transformer layer individually with torch.compile."""
+    torch._dynamo.config.capture_scalar_outputs = True
+    logger = get_logger()
+    for layer in model.model.layers:
+        layer.compile(fullgraph=compile_config.fullgraph)
+    logger.info(f"Compiled {len(model.model.layers)} layers (fullgraph={compile_config.fullgraph})")
+
+
 def setup_model(config: ModelConfig, parallel_dims: ParallelDims) -> nn.Module:
     """Load model from HF"""
     model = get_model(
         config, device=torch.device("meta"), dtype=DTYPE_MAP[config.optimization_dtype]
     )
+
+    # compile before FSDP
+    if config.compile is not None:
+        apply_compile(model, config.compile)
+
     # apply fsdp
     setup_fsdp(model, config, parallel_dims)
 
