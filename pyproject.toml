@@ -7,7 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     # Core ML
     "torch>=2.9.0",
-    "transformers==4.57.3",
+    "transformers",
 
     # Data loading
     "datasets>=4.0.0",
@@ -30,7 +30,7 @@ dependencies = [
     "liger-kernel>=0.5.10",        # Efficient cross entropy loss
 
     "uvloop>=0.21.0",
-    "vllm==0.14.0",
+    "vllm",
 
     "openai>=1.106.1",
     "verifiers>=0.1.8",
@@ -48,7 +48,7 @@ rl = "nano_rl.rl:main"
 
 [project.optional-dependencies]
 flash-attn = [
-    "flash-attn @ https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.6.8/flash_attn-2.8.3+cu128torch2.9-cp312-cp312-linux_x86_64.whl",
+    "flash-attn @ https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.7.16/flash_attn-2.6.3%2Bcu128torch2.10-cp312-cp312-linux_x86_64.whl",
 ]
 dev = [
     "ipykernel>=6.29.5",
@@ -60,10 +60,15 @@ dev = [
 [tool.uv]
 prerelease = "allow"
 no-build-isolation-package = ["flash-attn"]
+override-dependencies = [
+    "transformers>=5.1.0.dev0",
+]
 
 [tool.uv.sources]
 torch = { index = "pytorch-cu128" }
 reverse-text = { index = "primeintellect" }
+transformers = { git = "https://github.com/huggingface/transformers.git", rev = "609e3d5" }
+vllm = { url = "https://github.com/vllm-project/vllm/releases/download/v0.16.0/vllm-0.16.0-cp38-abi3-manylinux_2_31_x86_64.whl" }
 
 
 [tool.uv.extra-build-dependencies]

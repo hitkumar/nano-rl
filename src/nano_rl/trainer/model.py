@@ -39,6 +39,9 @@ def get_model(
     )
     # disable kv-cache for training
     model_config.use_cache = False
+    # transformers 5 requires pad_token_id to be set
+    if not hasattr(model_config, "pad_token_id") or model_config.pad_token_id is None:
+        model_config.pad_token_id = model_config.eos_token_id
     with device:
         match config.impl:
             case "hf":
@@ -69,16 +72,25 @@ def get_model(
 def fix_model_post_empty(model: nn.Module) -> None:
     """
     Reinitializes the pos embedding buffers as they are not saved when model is saved.
-    TODO: Does this work for Liger model class as well?
+    After to_empty(), all buffers contain uninitialized memory and must be recomputed.
     """
     buffer_names = [name for name, _ in model.named_buffers()]
-    # HF standard transformer model
     if "model.rotary_emb.inv_freq" in buffer_names:
         rotary_emb = model.model.rotary_emb
-        inv_freq, rotary_emb.attention_scaling = rotary_emb.rope_init_fn(
-            rotary_emb.config, rotary_emb.inv_freq.device
-        )
+        if hasattr(rotary_emb, "rope_init_fn"):
+            # transformers 4
+            inv_freq, rotary_emb.attention_scaling = rotary_emb.rope_init_fn(
+                rotary_emb.config, rotary_emb.inv_freq.device
+            )
+        else:
+            # transformers 5: rope_init_fn is no longer an attribute,
+            # use compute_default_rope_parameters static method instead
+            inv_freq, rotary_emb.attention_scaling = rotary_emb.compute_default_rope_parameters(
+                rotary_emb.config, rotary_emb.inv_freq.device
+            )
         rotary_emb.inv_freq.copy_(inv_freq)
+        if hasattr(rotary_emb, "original_inv_freq"):
+            rotary_emb.original_inv_freq.copy_(inv_freq)
 
 
 def load_dcp_from_hf(model: nn.Module, config: ModelConfig) -> None:

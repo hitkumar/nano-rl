@@ -101,7 +101,7 @@ class WeightUpdateWorker(Worker):
     - NCCL: Receive weights directly from trainer via GPU-to-GPU broadcast
 
     The mode is determined by whether init_broadcaster() was called.
-    If init_broadcaster() was called, update_weights() uses NCCL.
+    If init_broadcaster() was called, update_weights_from_path() uses NCCL.
     Otherwise, it loads from the filesystem path.
 
     Note: We don't define __init__ because vLLM injects attributes dynamically.
@@ -147,7 +147,7 @@ class WeightUpdateWorker(Worker):
             timeout=timeout,
         )
 
-    def update_weights(self, weight_path: str) -> None:
+    def update_weights_from_path(self, weight_path: str) -> None:
         model = getattr(self.model_runner.model, "runnable", self.model_runner.model)
         assert isinstance(model, Module)
 
