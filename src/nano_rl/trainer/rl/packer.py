@@ -38,7 +38,7 @@ def prepare_sample(
     position_ids = list(range(len(input_ids)))
     prompt_len = len(prompt_ids)
     completion_len = len(completion_ids)
-    loss_mask = [0] * prompt_len + [1] * completion_len
+    loss_mask = [0] * prompt_len + [int(m) for m in training_sample.completion_mask]
     advantages = [0] * prompt_len + [advantage] * completion_len
     inference_logprobs = [0] * prompt_len + completion_logprobs
 

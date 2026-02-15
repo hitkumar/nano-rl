@@ -69,15 +69,17 @@ async def generate_rollout(
 
 
 def get_completion_len(state: vf.State) -> int:
-    """Assumes single turn env"""
-    return len(state["trajectory"][0]["tokens"]["completion_ids"])
+    """Total completion tokens across all turns."""
+    return sum(len(step["tokens"]["completion_ids"]) for step in state["trajectory"])
 
 
 def get_prompt_len(state: vf.State) -> int:
-    """Assumes single turn env"""
+    """Length of the initial prompt (first turn only)."""
     return len(state["trajectory"][0]["tokens"]["prompt_ids"])
 
 
 def get_seq_len(state: vf.State) -> int:
-    """Assumes single turn env"""
-    return get_completion_len(state) + get_prompt_len(state)
+    """Total sequence length. The last step's prompt contains the full conversation
+    history, so prompt + completion of the last step gives the total token count."""
+    last = state["trajectory"][-1]["tokens"]
+    return len(last["prompt_ids"]) + len(last["completion_ids"])

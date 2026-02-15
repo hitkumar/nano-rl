@@ -14,7 +14,7 @@ from nano_rl.orchestrator.config import (
     OrchestratorConfig,
     SamplingConfig,
 )
-from nano_rl.orchestrator.orchestrator import orchestrate, state_to_training_sample
+from nano_rl.orchestrator.orchestrator import orchestrate
 from nano_rl.orchestrator.utils import set_semaphore
 from nano_rl.transport import setup_training_batch_receiver
 from nano_rl.utils.config import ClientConfig
@@ -93,7 +93,7 @@ async def test_orchestrator_produces_valid_training_samples(
         assert len(sample.completion_ids) == len(sample.completion_mask)
         assert len(sample.completion_ids) == len(sample.completion_logprobs)
 
-        # Check logprobs are negative (valid log probabilities)
+        # Check logprobs are non-positive (valid log probabilities, 0.0 for env feedback tokens)
         assert all(lp <= 0 for lp in sample.completion_logprobs)
 
     advantages = [s.advantage for s in batch.examples]

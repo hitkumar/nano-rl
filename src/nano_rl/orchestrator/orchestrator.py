@@ -10,23 +10,12 @@ from nano_rl.orchestrator.advantage import compute_advantages
 from nano_rl.orchestrator.config import OrchestratorConfig
 from nano_rl.orchestrator.scheduler import Scheduler
 from nano_rl.orchestrator.utils import set_semaphore
+from nano_rl.orchestrator.trajectories import interleave_rollout
 from nano_rl.transport import setup_training_batch_sender, TrainingBatch, TrainingSample
 from nano_rl.utils.client import check_health, init_nccl_broadcast, setup_admin_clients, setup_clients
 from nano_rl.utils.logger import get_logger, setup_logger
 from nano_rl.utils.pydantic_config import parse_argv
 from nano_rl.utils.vf import get_completion_len
-
-
-def state_to_training_sample(state: vf.State, advantage: float) -> TrainingSample:
-    tokens = state["trajectory"][0]["tokens"]
-    return TrainingSample(
-        prompt_ids=tokens["prompt_ids"],
-        prompt_mask=[bool(i) for i in tokens["prompt_mask"]],
-        completion_ids=tokens["completion_ids"],
-        completion_mask=[bool(i) for i in tokens["completion_mask"]],
-        completion_logprobs=tokens["completion_logprobs"],
-        advantage=advantage,
-    )
 
 
 def setup_envs(config: OrchestratorConfig) -> list[vf.Environment]:
@@ -118,10 +107,16 @@ async def orchestrate(config: OrchestratorConfig) -> None:
                 rollouts_per_example=config.rollouts_per_example,
                 advantage_config=config.advantage,
             )
-            samples = [
-                state_to_training_sample(state, advantage)
-                for (state, advantage) in zip(states, advantages)
-            ]
+            # Convert rollouts to training samples via trajectory interleaving.
+            # Each state can produce multiple samples if extension breaks.
+            samples: list[TrainingSample] = []
+            for state, advantage in zip(states, advantages):
+                rollout_samples = interleave_rollout(state)
+                if rollout_samples is None:
+                    continue
+                for sample in rollout_samples:
+                    sample.advantage = advantage
+                samples.extend(rollout_samples)
 
             # filter samples that are too long, maybe this filtering should be in scheduler
             samples = [

@@ -100,6 +100,4 @@ class InferenceConfig(BaseSettings):
             seed=self.seed,
             # we don't want the raw logits, but actual probabilities
             logprobs_mode="processed_logprobs",
-            # set this in the server directly.
-            # worker_extension_cls="nano_rl.inference.worker.WeightUpdateWorker",
         )
