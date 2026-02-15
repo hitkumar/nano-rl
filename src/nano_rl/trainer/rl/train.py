@@ -86,6 +86,7 @@ def train(config: RlTrainerConfig) -> None:
             tokenizer=tokenizer,
             config=config.rollout_transport,
             dp_world_size=parallel_dims.dp_degree,
+            gradient_accumulation_steps=config.gradient_accumulation_steps,
         )
 
     log0("starting training loop")
@@ -214,8 +215,9 @@ def train(config: RlTrainerConfig) -> None:
             f"Loss {avg_loss.item():.4f} | "
             f"Wait {wait_time:.2f}s | "
             f"Compute {compute_time:.2f}s | "
-            f"MFU {mfu:.2f}% |"
-            f"batch_size {batch_size}|"
+            f"MFU {mfu:.2f}% | "
+            f"Peak Mem {peak_memory:.1f} GiB | "
+            f"batch_size {batch_size} | "
             f"Throughput {throughput:.0f} tok/s"
         )
 

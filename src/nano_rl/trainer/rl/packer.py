@@ -120,7 +120,11 @@ def pack_samples_into_micro_batches(
 
 
 def prepare_batch(
-    training_batch: TrainingBatch, dp_world_size: int, seq_len: int, pad_id: int
+    training_batch: TrainingBatch,
+    dp_world_size: int,
+    seq_len: int,
+    pad_id: int,
+    gradient_accumulation_steps: int = 1,
 ) -> list[list[MicroBatch]]:
     """
     Convert TrainingBatch into a grid of MicroBatches for each DP rank.
@@ -130,6 +134,7 @@ def prepare_batch(
         dp_world_size: Number of data parallel ranks
         seq_len: Target sequence length
         pad_id: Padding token ID
+        gradient_accumulation_steps: Number of gradient accumulation steps per rank
 
     Returns:
         micro_batch_grid[dp_rank] = list of MicroBatches for that rank
@@ -139,12 +144,16 @@ def prepare_batch(
         for sample in training_batch.examples
     ]
     packed_samples = pack_samples_into_micro_batches(samples, seq_len, pad_id)
-    if len(packed_samples) % dp_world_size != 0:
+    # Total count must be divisible by dp_world_size * gradient_accumulation_steps
+    # so each rank gets a count divisible by gradient_accumulation_steps
+    divisor = dp_world_size * gradient_accumulation_steps
+    if len(packed_samples) % divisor != 0:
+        num_dummy = divisor - len(packed_samples) % divisor
         get_logger().warning(
-            f"packed_samples count ({len(packed_samples)}) is not divisible by dp_world_size ({dp_world_size}), "
-            f"adding {dp_world_size - len(packed_samples) % dp_world_size} dummy batch(es)"
+            f"packed_samples count ({len(packed_samples)}) is not divisible by "
+            f"dp_world_size * grad_accum_steps ({divisor}), adding {num_dummy} dummy batch(es)"
         )
-    while len(packed_samples) % dp_world_size != 0:
+    while len(packed_samples) % divisor != 0:
         # Create a dummy batch with all padding (zero advantage = no gradient contribution)
         dummy = MicroBatch(
             input_ids=[pad_id] * seq_len,
@@ -179,12 +188,14 @@ class Packer:
         tokenizer: PreTrainedTokenizer,
         receiver: TrainingBatchReceiver,
         sender: MicroBatchSender,
+        gradient_accumulation_steps: int = 1,
     ):
         self.dp_world_size = dp_world_size
         self.seq_len = seq_len
         self.pad_id = tokenizer.pad_token_id or tokenizer.eos_token_id
         self.receiver = receiver
         self.sender = sender
+        self.gradient_accumulation_steps = gradient_accumulation_steps
         self.logger = get_logger()
 
     def pack(self) -> None:
@@ -199,7 +210,8 @@ class Packer:
             f"with {len(training_batch.examples)} examples"
         )
         micro_batch_grid = prepare_batch(
-            training_batch, self.dp_world_size, self.seq_len, self.pad_id
+            training_batch, self.dp_world_size, self.seq_len, self.pad_id,
+            self.gradient_accumulation_steps,
         )
         batches_per_rank = len(micro_batch_grid[0])
         self.logger.debug(f"Sending {batches_per_rank} batches per rank")
@@ -213,6 +225,7 @@ def setup_packer(
     tokenzer: PreTrainedTokenizer,
     transport_config: TransportConfigType,
     start_step: int = 0,
+    gradient_accumulation_steps: int = 1,
 ) -> Packer:
     receiver: TrainingBatchReceiver = setup_training_batch_receiver(
         output_dir, start_step, transport_config
@@ -226,4 +239,5 @@ def setup_packer(
         tokenizer=tokenzer,
         receiver=receiver,
         sender=sender,
+        gradient_accumulation_steps=gradient_accumulation_steps,
     )

@@ -101,6 +101,7 @@ class DataLoader:
         tokenizer: PreTrainedTokenizer,
         config: TransportConfigType,
         dp_world_size: int,
+        gradient_accumulation_steps: int = 1,
     ):
         self.world = get_world()
         self.seq_len = seq_len
@@ -114,7 +115,8 @@ class DataLoader:
         self.packer: Packer | None = None
         if self.world.is_master:
             self.packer = setup_packer(
-                output_dir, dp_world_size, seq_len, tokenizer, config, start_step
+                output_dir, dp_world_size, seq_len, tokenizer, config, start_step,
+                gradient_accumulation_steps,
             )
 
         # All ranks receive their own microbatches
