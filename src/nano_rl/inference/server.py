@@ -1,9 +1,12 @@
 import os
-from argparse import Namespace
 
 import uvloop
 from fastapi import APIRouter, Request
 from nano_rl.inference.config import InferenceConfig
+from nano_rl.inference.patches import (
+    monkey_patch_build_app,
+    monkey_patch_tokenize_params_validation,
+)
 from nano_rl.utils.pydantic_config import parse_argv
 from vllm.engine.protocol import EngineClient
 from vllm.entrypoints.openai.cli_args import make_arg_parser, validate_parsed_serve_args
@@ -60,20 +63,9 @@ async def init_broadcaster(request: Request):
     return {"status": "ok"}
 
 
-# --- Monkey-patch to inject custom router into vLLM 0.16's app lifecycle ---
-
-import vllm.entrypoints.openai.api_server
-from vllm.entrypoints.openai.api_server import build_app as _original_build_app
-
-
-def custom_build_app(args: Namespace, supported_tasks: tuple):
-    """Wrap build_app to include our custom router."""
-    app = _original_build_app(args, supported_tasks)
-    app.include_router(router)
-    return app
-
-
-vllm.entrypoints.openai.api_server.build_app = custom_build_app
+# Apply monkey patches
+monkey_patch_build_app()
+monkey_patch_tokenize_params_validation()
 
 
 def main():
