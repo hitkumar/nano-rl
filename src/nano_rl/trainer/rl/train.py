@@ -86,7 +86,6 @@ def train(config: RlTrainerConfig) -> None:
             tokenizer=tokenizer,
             config=config.rollout_transport,
             dp_world_size=parallel_dims.dp_degree,
-            gradient_accumulation_steps=config.gradient_accumulation_steps,
         )
 
     log0("starting training loop")
@@ -117,27 +116,29 @@ def train(config: RlTrainerConfig) -> None:
         total_mismatch_kl = 0.0
         total_tokens_masked = 0.0
 
-        # Split batch into chunks for gradient accumulation
-        grad_accum_steps = config.gradient_accumulation_steps
+        # Process micro-batches with configurable batch size per forward pass
         batch_size = batch["input_ids"].shape[0]
-        assert batch_size % grad_accum_steps == 0
-        chunk_size = batch_size // grad_accum_steps
+        micro_batch_size = config.micro_batch_size
+        num_fwd_passes = (batch_size + micro_batch_size - 1) // micro_batch_size
 
-        for i in range(grad_accum_steps):
-            start_idx = i * chunk_size
-            end_idx = start_idx + chunk_size if i < grad_accum_steps - 1 else batch_size
+        # Token-level scaling: normalize by total unmasked tokens across the full batch
+        # Sequence-level scaling: normalize by number of forward passes
+        if config.loss.ratio_type == "token":
+            token_loss_scale = max(batch["loss_mask"].sum().item(), 1)
+        else:
+            token_loss_scale = None
 
+        for i in range(0, batch_size, micro_batch_size):
+            end = min(i + micro_batch_size, batch_size)
             off_policy_step = step - batch["ckpt_step"]
             total_off_policy_step += off_policy_step
 
-            # move batch chunk to device
-            input_ids = batch["input_ids"][start_idx:end_idx].to(device)
-            position_ids = batch["position_ids"][start_idx:end_idx].to(device)
-            loss_mask = batch["loss_mask"][start_idx:end_idx].to(device)
-            advantages = batch["advantages"][start_idx:end_idx].to(device)
-            inference_logprobs = batch["inference_logprobs"][start_idx:end_idx].to(
-                device
-            )
+            # move micro-batch to device
+            input_ids = batch["input_ids"][i:end].to(device)
+            position_ids = batch["position_ids"][i:end].to(device)
+            loss_mask = batch["loss_mask"][i:end].to(device)
+            advantages = batch["advantages"][i:end].to(device)
+            inference_logprobs = batch["inference_logprobs"][i:end].to(device)
             temperature = batch["temperature"]
 
             # forward pass
@@ -155,9 +156,9 @@ def train(config: RlTrainerConfig) -> None:
                 advantages=advantages,
                 loss_mask=loss_mask,
                 loss_config=config.loss,
+                loss_scale=token_loss_scale,
             )
-            scaled_loss = loss / grad_accum_steps
-            scaled_loss.backward()
+            loss.backward()
             total_loss += loss.item()
             total_tokens += input_ids.numel()
             total_mismatch_kl += loss_diagnostics["mismatch_kl"].item()
@@ -168,15 +169,14 @@ def train(config: RlTrainerConfig) -> None:
             mean_entropy = entropy[loss_mask].mean()
             total_entropy += mean_entropy.item()
 
-            del logits, shifted_logits, trainer_logprobs, loss, scaled_loss
-            # torch.cuda.empty_cache()
+            del logits, shifted_logits, trainer_logprobs, loss
 
-        # Average loss across gradient accumulation steps
-        avg_loss = torch.tensor(total_loss / grad_accum_steps, device=device)
-        avg_entropy = torch.tensor(total_entropy / grad_accum_steps, device=device)
-        avg_off_policy_step = total_off_policy_step / grad_accum_steps
-        avg_mismatch_kl = total_mismatch_kl / grad_accum_steps
-        avg_tokens_masked = total_tokens_masked / grad_accum_steps
+        # Average metrics across forward passes
+        avg_loss = torch.tensor(total_loss / num_fwd_passes, device=device)
+        avg_entropy = torch.tensor(total_entropy / num_fwd_passes, device=device)
+        avg_off_policy_step = total_off_policy_step / num_fwd_passes
+        avg_mismatch_kl = total_mismatch_kl / num_fwd_passes
+        avg_tokens_masked = total_tokens_masked / num_fwd_passes
         # synchronize loss across all ranks, only for logging and monitoring
         dist.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
         dist.all_reduce(avg_entropy, op=dist.ReduceOp.AVG)
@@ -249,7 +249,9 @@ def train(config: RlTrainerConfig) -> None:
         broadcast_time = 0.0
         is_final_step = config.max_steps and step >= config.max_steps - 1
         should_broadcast = step > 0 and step % config.broadcast_interval == 0
-        if should_broadcast and (not is_final_step or config.weight_broadcast.type == "filesystem"):
+        if should_broadcast and (
+            not is_final_step or config.weight_broadcast.type == "filesystem"
+        ):
             broadcast_start = time.perf_counter()
             weight_broadcaster.broadcast_weights(model, step)
             broadcast_time = time.perf_counter() - broadcast_start

@@ -64,8 +64,15 @@ def compute_loss(
     advantages: Float[Tensor, "batch seq"],  # same for all tokens in the sequence,
     loss_mask: Bool[Tensor, "batch seq"],
     loss_config: LossConfig,
+    loss_scale: float | None = None,
 ) -> tuple[Float[Tensor, ""], dict[str, Tensor]]:
-    """Computes GRPO loss"""
+    """Computes GRPO loss.
+
+    Args:
+        loss_scale: If provided, normalize the loss sum by this value instead of
+            the number of unmasked tokens in this micro-batch. Used for token-level
+            scaling across the full batch.
+    """
 
     log_importance_ratio = trainer_logprobs - inference_logprobs
     importance_ratio = torch.exp(log_importance_ratio)
@@ -91,8 +98,13 @@ def compute_loss(
     # we detach coeff here so that gradient doesn't flow this, it is meant to be a constant for policy gradient
     # if coeff > 0, gradient increase log_probs, coeff < 0 gradient decreases log_probs
     loss = -(coeff.detach() * trainer_logprobs)[keep_mask].sum()
-    num_tokens = keep_mask.sum().clamp(min=1)
-    loss = loss / num_tokens
+    if loss_scale is not None:
+        # Token-level scaling: normalize by total unmasked tokens across the full batch
+        loss = loss / loss_scale
+    else:
+        # Default: normalize by unmasked tokens in this micro-batch
+        num_tokens = keep_mask.sum().clamp(min=1)
+        loss = loss / num_tokens
     diagnostics = {
         "mismatch_kl": _safe_mean(mismatch_kl, loss_mask).detach(),
         "tokens_masked": tokens_masked[loss_mask].float().mean().detach(),

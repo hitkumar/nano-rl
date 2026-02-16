@@ -220,11 +220,11 @@ class RlTrainerConfig(BaseSettings):
         ),
     ] = 600
 
-    gradient_accumulation_steps: Annotated[
+    micro_batch_size: Annotated[
         int,
         Field(
             ge=1,
-            description="Number of gradient accumulation steps. Splits the batch into this many chunks for sequential forward/backward passes before optimizer step.",
+            description="Number of micro-batches to process per forward pass. Higher values improve GPU utilization but use more memory.",
         ),
     ] = 1
 

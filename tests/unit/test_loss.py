@@ -78,3 +78,36 @@ def test_empty_mask_returns_zero_loss():
         loss_config=LossConfig(),
     )
     assert loss_empty.item() == 0.0
+
+
+def test_loss_scale_token_level():
+    """When loss_scale is provided, loss is normalized by loss_scale instead of per-micro-batch token count."""
+    inputs = _make_loss_inputs()
+
+    # Without loss_scale: normalized by keep_mask.sum() internally
+    loss_default, _ = compute_loss(**inputs, loss_config=LossConfig())
+
+    # With loss_scale: normalized by loss_scale instead
+    # Use the same value as internal normalization to get the same result
+    loss_mask = inputs["loss_mask"]
+    loss_config = LossConfig()
+    log_ratio = inputs["trainer_logprobs"] - inputs["inference_logprobs"]
+    ratio = torch.exp(log_ratio)
+    tokens_masked = (ratio < loss_config.token_clip_low) | (ratio > loss_config.token_clip_high)
+    keep_mask = loss_mask & ~tokens_masked
+    num_keep = keep_mask.sum().item()
+
+    loss_same, _ = compute_loss(**inputs, loss_config=loss_config, loss_scale=num_keep)
+    assert abs(loss_same.item() - loss_default.item()) < 1e-5
+
+    # With 2x loss_scale, loss should be half (since the sum is the same, just divided by 2x)
+    loss_double, _ = compute_loss(**inputs, loss_config=loss_config, loss_scale=num_keep * 2)
+    assert abs(loss_double.item() - loss_default.item() / 2) < 1e-5
+
+
+def test_loss_scale_none_uses_micro_batch_normalization():
+    """When loss_scale is None, loss is normalized by unmasked tokens in the micro-batch (default behavior)."""
+    inputs = _make_loss_inputs()
+    loss_none, _ = compute_loss(**inputs, loss_config=LossConfig(), loss_scale=None)
+    loss_default, _ = compute_loss(**inputs, loss_config=LossConfig())
+    assert loss_none.item() == loss_default.item()
