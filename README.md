@@ -132,6 +132,18 @@ With `max_async_level=1` (required for NCCL), the trainer and orchestrator are t
 
 - [prime-RL documentation](https://github.com/PrimeIntellect-ai/prime-rl/blob/main/docs/index.md)
 
+## Research
+
+### LoRA for RL Post-Training
+
+[LoRA Without Regret](https://thinkingmachines.ai/blog/lora/) (Schulman et al, 2025) investigates when LoRA matches full fine-tuning. Experiments use Llama 3 and Qwen3 models on Tulu3 and OpenThoughts3 (SFT), and MATH, GSM, and DeepMath (RL). Key findings:
+
+- **LoRA matches FullFT for RL, even at rank 1.** Policy gradient methods absorb ~1 bit per episode (a single scalar reward), so even rank-1 LoRA has sufficient capacity.
+- **Apply LoRA to all layers, especially MLP/MoE.** Attention-only LoRA significantly underperforms. MLP-only matches MLP+attention.
+- **Optimal LR for LoRA is ~10x FullFT.** Consistently across models and tasks. For short runs (~100 steps), closer to 15x.
+- **LoRA is less tolerant of large batch sizes.** A persistent gap at large batches, but both LoRA and FullFT achieve best performance at smaller batch sizes, so this may not matter in practice.
+- **LoRA uses ~2/3 the FLOPs of FullFT per step.** Same forward pass, cheaper backward pass.
+
 ## Backlog
 
 ### Infrastructure
