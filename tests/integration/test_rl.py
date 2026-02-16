@@ -65,3 +65,28 @@ def test_launcher_detects_gpu_overlap():
     result = subprocess.run(cmd, timeout=60, capture_output=True, text=True)
     assert result.returncode != 0
     assert "overlap" in result.stderr.lower()
+
+
+@pytest.mark.gpu
+@pytest.mark.slow
+def test_rl_multiturn(tmp_path):
+    """Test that multi-turn RL training completes without errors."""
+    output_dir = tmp_path / "outputs"
+    cmd = [
+        "uv", "run", "rl",
+        "@", "configs/test/rl_multiturn.toml",
+        "--output-dir", str(output_dir),
+    ]
+    result = subprocess.run(cmd, timeout=TIMEOUT, capture_output=True, text=True)
+
+    assert result.returncode == 0, f"Multi-turn RL failed:\n{result.stdout}\n{result.stderr}"
+
+    trainer_log = output_dir / "logs" / "trainer.log"
+    assert trainer_log.exists(), "Trainer log not created"
+    trainer_output = trainer_log.read_text()
+    assert "Step 0" in trainer_output
+    assert "Step 2" in trainer_output
+
+    orchestrator_log = output_dir / "logs" / "orchestrator.log"
+    assert orchestrator_log.exists(), "Orchestrator log not created"
+    assert "avg_reward" in orchestrator_log.read_text()
