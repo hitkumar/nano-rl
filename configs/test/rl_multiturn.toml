@@ -1,7 +1,7 @@
 # Minimal config for multi-turn RL integration testing
 # Uses 2 GPUs: 1 inference, 1 trainer
 
-output_dir = "outputs/test_rl_multiturn"
+run_id = "test_rl_multiturn"
 max_steps = 3
 seq_len = 2048
 max_async_level = 1

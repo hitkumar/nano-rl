@@ -1,3 +1,4 @@
+run_id = "reverse_text_sft"
 max_steps = 100
 loss_impl = "liger"
 

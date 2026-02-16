@@ -61,13 +61,13 @@ uv run rl @ configs/examples/alphabet_sort/rl.toml
 
 Load the trained checkpoint on the inference server:
 ```bash
-CUDA_VISIBLE_DEVICES=0 uv run inference --model.name outputs/alphabet_sort_rl/weights/step_100
+CUDA_VISIBLE_DEVICES=0 uv run inference --model.name outputs/runs/alphabet_sort_rl/weights/step_100
 ```
 
 Evaluate:
 ```bash
 uv run vf-eval alphabet-sort \
-  -m outputs/alphabet_sort_rl/weights/step_100 \
+  -m outputs/runs/alphabet_sort_rl/weights/step_100 \
   -b http://localhost:8000/v1 \
   -n 20 \
   --max-tokens 768 \

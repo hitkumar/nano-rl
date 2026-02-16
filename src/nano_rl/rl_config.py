@@ -120,13 +120,15 @@ class RLConfig(BaseSettings):
     # Shared configurations (propagated to submodules)
     # =========================================================================
 
-    output_dir: Annotated[
-        Path,
+    run_id: Annotated[
+        str,
         Field(
-            description="The directory to store outputs. "
-            "Should typically be set to an experiment identifier."
+            description="Unique identifier for this experiment run. "
+            "All outputs are stored under outputs/runs/{run_id}/."
         ),
-    ] = Path("outputs/rl")
+    ]
+
+    output_dir: Path = Path("outputs/runs")
 
     ckpt: Annotated[
         SharedCheckpointConfig | None,
@@ -201,10 +203,10 @@ class RLConfig(BaseSettings):
 
     @model_validator(mode="after")
     def auto_setup_output_dir(self):
-        """Propagate output_dir to trainer and orchestrator."""
-        if self.output_dir is not None:
-            self.trainer.output_dir = self.output_dir
-            self.orchestrator.output_dir = self.output_dir
+        """Derive output_dir from run_id and propagate to trainer and orchestrator."""
+        self.output_dir = Path("outputs/runs") / self.run_id
+        self.trainer.output_dir = self.output_dir
+        self.orchestrator.output_dir = self.output_dir
         return self
 
     @model_validator(mode="after")

@@ -1,6 +1,7 @@
 """Integration test for unified RL launcher"""
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -12,15 +13,16 @@ TIMEOUT = 600  # 10 minutes
 @pytest.mark.slow
 def test_rl_unified_launcher(tmp_path):
     """Test that the unified RL launcher completes without errors."""
-    output_dir = tmp_path / "outputs"
+    run_id = f"test_rl_{tmp_path.name}"
+    output_dir = Path("outputs/runs") / run_id
     cmd = [
         "uv",
         "run",
         "rl",
         "@",
         "configs/test/rl.toml",
-        "--output-dir",
-        str(output_dir),
+        "--run-id",
+        run_id,
     ]
     result = subprocess.run(
         cmd, timeout=TIMEOUT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
@@ -43,17 +45,14 @@ def test_rl_unified_launcher(tmp_path):
 
 @pytest.mark.gpu
 @pytest.mark.slow
-def test_launcher_detects_trainer_failure(tmp_path):
+def test_launcher_detects_trainer_failure():
     """Test that the launcher exits with non-zero when the trainer crashes."""
-    output_dir = tmp_path / "outputs"
     cmd = [
         "uv",
         "run",
         "rl",
         "@",
         "configs/test/rl.toml",
-        "--output-dir",
-        str(output_dir),
         "--model.name",
         "nonexistent/model-does-not-exist",
     ]
@@ -85,15 +84,16 @@ def test_launcher_detects_gpu_overlap():
 @pytest.mark.slow
 def test_rl_multiturn(tmp_path):
     """Test that multi-turn RL training completes without errors."""
-    output_dir = tmp_path / "outputs"
+    run_id = f"test_rl_mt_{tmp_path.name}"
+    output_dir = Path("outputs/runs") / run_id
     cmd = [
         "uv",
         "run",
         "rl",
         "@",
         "configs/test/rl_multiturn.toml",
-        "--output-dir",
-        str(output_dir),
+        "--run-id",
+        run_id,
     ]
     result = subprocess.run(
         cmd, timeout=TIMEOUT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL

@@ -292,8 +292,8 @@ class TestPrepareBatch:
         # 1 batch with dp_world_size=2 requires padding
         prepare_batch(training_batch, dp_world_size=2, seq_len=12, pad_id=0)
 
-        mock_logger.warning.assert_called_once()
-        call_args = mock_logger.warning.call_args[0][0]
+        mock_logger.debug.assert_called()
+        call_args = mock_logger.debug.call_args[0][0]
         assert "not divisible" in call_args
 
     def test_all_batches_have_correct_seq_len(self, mock_logger):

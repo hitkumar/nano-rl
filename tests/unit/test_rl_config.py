@@ -8,6 +8,7 @@ from nano_rl.rl_config import RLConfig, SharedModelConfig, SharedWeightBroadcast
 def _make_config(**kwargs):
     """Create RLConfig with inference enabled by default."""
     defaults = dict(
+        run_id="test",
         inference_gpu_ids=[0],
         trainer_gpu_ids=[1],
     )
@@ -40,9 +41,10 @@ def test_async_level_propagates():
 
 
 def test_output_dir_propagates():
-    config = _make_config(output_dir="outputs/test")
-    assert str(config.trainer.output_dir) == "outputs/test"
-    assert str(config.orchestrator.output_dir) == "outputs/test"
+    config = _make_config(run_id="my_experiment")
+    assert str(config.output_dir) == "outputs/runs/my_experiment"
+    assert str(config.trainer.output_dir) == "outputs/runs/my_experiment"
+    assert str(config.orchestrator.output_dir) == "outputs/runs/my_experiment"
 
 
 def test_log_level_propagates():
@@ -93,6 +95,7 @@ def test_gpu_overlap_raises():
 def test_nccl_single_gpu_raises():
     with pytest.raises(Exception, match="at least 2 GPUs"):
         RLConfig(
+            run_id="test",
             inference_gpu_ids=[],
             trainer_gpu_ids=[0],
             inference=None,
@@ -104,6 +107,7 @@ def test_seq_len_trainer_less_than_orch_raises():
     """Trainer seq_len must be >= orchestrator seq_len."""
     with pytest.raises(Exception, match="seq_len"):
         RLConfig(
+            run_id="test",
             inference_gpu_ids=[0],
             trainer_gpu_ids=[1],
             # Don't use shared seq_len — set them independently to create mismatch

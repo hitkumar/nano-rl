@@ -1,7 +1,7 @@
 # Unified RL config for reverse_text experiment
 # Usage: uv run rl @ configs/examples/reverse_text/rl/rl.toml
 
-output_dir = "outputs/rl"
+run_id = "reverse_text_rl"
 max_steps = 100
 seq_len = 2048
 max_async_level = 1
@@ -13,7 +13,7 @@ trainer_gpu_ids = [4, 5, 6, 7]
 
 [model]
 # SFT model as starting point
-name = "outputs/sft/weights/step_100"
+name = "outputs/runs/reverse_text_sft/weights/step_100"
 
 [weight_broadcast]
 type = "nccl"

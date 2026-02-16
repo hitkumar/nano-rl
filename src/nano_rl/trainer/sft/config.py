@@ -127,14 +127,23 @@ class SFTTrainerConfig(BaseSettings):
 
     log: LogConfig = LogConfig()
 
-    output_dir: Annotated[
-        Path,
+    run_id: Annotated[
+        str,
         Field(
-            description="Directory to write outputs to. Will be populated with checkpoints and logs as subdirectories. Should be set to a persistent directory with enough disk space. This value should be distinct across experiments running on a single node. See the README for more details."
+            description="Unique identifier for this experiment run. "
+            "All outputs are stored under outputs/runs/{run_id}/."
         ),
-    ] = Path("outputs/sft")
+    ]
+
+    output_dir: Path = Path("outputs/runs")
 
     ckpt: CheckpointConfig | None = CheckpointConfig()
+
+    @model_validator(mode="after")
+    def auto_setup_output_dir(self):
+        """Derive output_dir from run_id."""
+        self.output_dir = Path("outputs/runs") / self.run_id
+        return self
 
     @model_validator(mode="after")
     def auto_setup_tokenizer(self):

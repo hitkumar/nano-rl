@@ -1,4 +1,5 @@
 # Minimal SFT config for integration testing
+run_id = "test_sft"
 max_steps = 3
 
 [model]

@@ -139,15 +139,11 @@ def prepare_batch(
         for sample in training_batch.examples
     ]
     packed_samples = pack_samples_into_micro_batches(samples, seq_len, pad_id)
-    _logged_padding_warning = getattr(prepare_batch, "_logged_padding_warning", False)
     if len(packed_samples) % dp_world_size != 0:
-        if not _logged_padding_warning:
-            get_logger().warning(
-                f"packed_samples count ({len(packed_samples)}) is not divisible by dp_world_size ({dp_world_size}), "
-                f"adding {dp_world_size - len(packed_samples) % dp_world_size} dummy batch(es). "
-                f"This is expected with variable-length multi-turn rollouts."
-            )
-            prepare_batch._logged_padding_warning = True
+        get_logger().debug(
+            f"packed_samples count ({len(packed_samples)}) is not divisible by dp_world_size ({dp_world_size}), "
+            f"adding {dp_world_size - len(packed_samples) % dp_world_size} dummy batch(es)"
+        )
     while len(packed_samples) % dp_world_size != 0:
         # Create a dummy batch with all padding (zero advantage = no gradient contribution)
         dummy = MicroBatch(

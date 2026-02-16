@@ -1,7 +1,7 @@
 # Unified RL launcher config
 # Usage: uv run rl @ configs/debug/rl_unified.toml
 
-output_dir = "outputs/rl"
+run_id = "debug_rl"
 max_steps = 20
 seq_len = 8192
 max_async_level = 1
