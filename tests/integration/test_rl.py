@@ -1,7 +1,6 @@
 """Integration test for unified RL launcher"""
 
 import subprocess
-from pathlib import Path
 
 import pytest
 
@@ -15,14 +14,19 @@ def test_rl_unified_launcher(tmp_path):
     """Test that the unified RL launcher completes without errors."""
     output_dir = tmp_path / "outputs"
     cmd = [
-        "uv", "run", "rl",
-        "@", "configs/test/rl.toml",
-        "--output-dir", str(output_dir),
+        "uv",
+        "run",
+        "rl",
+        "@",
+        "configs/test/rl.toml",
+        "--output-dir",
+        str(output_dir),
     ]
-    result = subprocess.run(cmd, timeout=TIMEOUT, capture_output=True, text=True)
+    result = subprocess.run(
+        cmd, timeout=TIMEOUT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
 
-    # Check process succeeded
-    assert result.returncode == 0, f"RL launcher failed:\n{result.stdout}\n{result.stderr}"
+    assert result.returncode == 0, "RL launcher failed, check logs"
 
     # Check trainer produced logs
     trainer_log = output_dir / "logs" / "trainer.log"
@@ -43,10 +47,15 @@ def test_launcher_detects_trainer_failure(tmp_path):
     """Test that the launcher exits with non-zero when the trainer crashes."""
     output_dir = tmp_path / "outputs"
     cmd = [
-        "uv", "run", "rl",
-        "@", "configs/test/rl.toml",
-        "--output-dir", str(output_dir),
-        "--model.name", "nonexistent/model-does-not-exist",
+        "uv",
+        "run",
+        "rl",
+        "@",
+        "configs/test/rl.toml",
+        "--output-dir",
+        str(output_dir),
+        "--model.name",
+        "nonexistent/model-does-not-exist",
     ]
     result = subprocess.run(cmd, timeout=TIMEOUT, capture_output=True, text=True)
     assert result.returncode != 0
@@ -57,10 +66,15 @@ def test_launcher_detects_trainer_failure(tmp_path):
 def test_launcher_detects_gpu_overlap():
     """Test that the launcher rejects overlapping inference and trainer GPU IDs."""
     cmd = [
-        "uv", "run", "rl",
-        "@", "configs/test/rl.toml",
-        "--inference-gpu-ids", "[0]",
-        "--trainer-gpu-ids", "[0]",
+        "uv",
+        "run",
+        "rl",
+        "@",
+        "configs/test/rl.toml",
+        "--inference-gpu-ids",
+        "[0]",
+        "--trainer-gpu-ids",
+        "[0]",
     ]
     result = subprocess.run(cmd, timeout=60, capture_output=True, text=True)
     assert result.returncode != 0
@@ -73,13 +87,19 @@ def test_rl_multiturn(tmp_path):
     """Test that multi-turn RL training completes without errors."""
     output_dir = tmp_path / "outputs"
     cmd = [
-        "uv", "run", "rl",
-        "@", "configs/test/rl_multiturn.toml",
-        "--output-dir", str(output_dir),
+        "uv",
+        "run",
+        "rl",
+        "@",
+        "configs/test/rl_multiturn.toml",
+        "--output-dir",
+        str(output_dir),
     ]
-    result = subprocess.run(cmd, timeout=TIMEOUT, capture_output=True, text=True)
+    result = subprocess.run(
+        cmd, timeout=TIMEOUT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
 
-    assert result.returncode == 0, f"Multi-turn RL failed:\n{result.stdout}\n{result.stderr}"
+    assert result.returncode == 0, "Multi-turn RL failed, check logs"
 
     trainer_log = output_dir / "logs" / "trainer.log"
     assert trainer_log.exists(), "Trainer log not created"

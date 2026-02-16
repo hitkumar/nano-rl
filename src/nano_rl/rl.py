@@ -257,6 +257,7 @@ def main() -> None:
         )
 
     processes: list[subprocess.Popen] = []
+    tail_processes: list[subprocess.Popen] = []
     monitor_threads: list[Thread] = []
     error_queue: list[Exception] = []
     stop_events: dict[str, Event] = {}
@@ -291,14 +292,14 @@ def main() -> None:
 
         # Tail trainer logs to terminal so the user sees progress
         tail_process = subprocess.Popen(["tail", "-F", str(trainer_log_path)])
-        processes.append(tail_process)
 
-        # Also show orchestrator reward lines
+        # Append orchestrator reward lines to trainer log so they show up in the tail
         orch_log_path = log_dir / "orchestrator.log"
         orch_tail = subprocess.Popen(
-            ["bash", "-c", f"while [ ! -f '{orch_log_path}' ]; do sleep 1; done; tail -F '{orch_log_path}' | grep --line-buffered avg_reward"],
+            ["bash", "-c", f"while [ ! -f '{orch_log_path}' ]; do sleep 1; done; tail -F '{orch_log_path}' | grep --line-buffered avg_reward >> '{trainer_log_path}'"],
         )
-        processes.append(orch_tail)
+
+        tail_processes.extend([tail_process, orch_tail])
 
         # Poll for errors until trainer exits.
         # Orchestrator never exits on its own (update_policy_loop keeps it alive),
@@ -327,6 +328,7 @@ def main() -> None:
         logger.exception("Exception occurred, terminating processes")
         sys.exit(1)
     finally:
+        cleanup_processes(tail_processes)
         cleanup_threads(monitor_threads)
         cleanup_processes(processes)
 
