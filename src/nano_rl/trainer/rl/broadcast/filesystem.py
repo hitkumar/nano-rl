@@ -48,7 +48,7 @@ class FileSystemWeightBroadcast(WeightBroadcast):
 
             self.saved_steps.append(step)
             self._maybe_clean()
-            self.logger.info(
+            self.logger.debug(
                 f"Weights broadcasted to {save_dir} in {time.perf_counter() - start_time:.2f}s"
             )
 

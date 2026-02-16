@@ -10,8 +10,8 @@ import time
 from pathlib import Path
 from threading import Event, Thread
 
-import tomli_w
 import pynvml
+import tomli_w
 from nano_rl.rl_config import RLConfig
 from nano_rl.utils.logger import get_logger, setup_logger
 from nano_rl.utils.pathing import (
@@ -292,6 +292,13 @@ def main() -> None:
         # Tail trainer logs to terminal so the user sees progress
         tail_process = subprocess.Popen(["tail", "-F", str(trainer_log_path)])
         processes.append(tail_process)
+
+        # Also show orchestrator reward lines
+        orch_log_path = log_dir / "orchestrator.log"
+        orch_tail = subprocess.Popen(
+            ["bash", "-c", f"while [ ! -f '{orch_log_path}' ]; do sleep 1; done; tail -F '{orch_log_path}' | grep --line-buffered avg_reward"],
+        )
+        processes.append(orch_tail)
 
         # Poll for errors until trainer exits.
         # Orchestrator never exits on its own (update_policy_loop keeps it alive),

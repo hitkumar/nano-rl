@@ -218,6 +218,6 @@ class NCCLWeightBroadcast(WeightBroadcast):
                 broadcast_state_dict(layer_state_dict, self.communicator)
 
         if self.world.is_master:
-            self.logger.info(
+            self.logger.debug(
                 f"Weights broadcasted via NCCL in {time.perf_counter() - start_time:.2f}s"
             )
