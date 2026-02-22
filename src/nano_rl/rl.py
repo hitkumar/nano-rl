@@ -288,18 +288,20 @@ def main() -> None:
             train_process, "trainer", stop_events, error_queue, monitor_threads
         )
 
-        logger.info("All processes started, showing trainer logs...")
+        logger.info("All processes started, showing trainer and orchestrator logs...")
 
-        # Tail trainer logs to terminal so the user sees progress
-        tail_process = subprocess.Popen(["tail", "-F", str(trainer_log_path)])
-
-        # Append orchestrator reward lines to trainer log so they show up in the tail
-        orch_log_path = log_dir / "orchestrator.log"
-        orch_tail = subprocess.Popen(
-            ["bash", "-c", f"while [ ! -f '{orch_log_path}' ]; do sleep 1; done; tail -F '{orch_log_path}' | grep --line-buffered avg_reward >> '{trainer_log_path}'"],
+        # Tail trainer logs with [trainer] prefix
+        trainer_tail = subprocess.Popen(
+            ["bash", "-c", f"tail -F '{trainer_log_path}' | sed --unbuffered 's/^/[trainer] /'"],
         )
 
-        tail_processes.extend([tail_process, orch_tail])
+        # Tail orchestrator avg_reward lines with [orch] prefix
+        orch_log_path = log_dir / "orchestrator.log"
+        orch_tail = subprocess.Popen(
+            ["bash", "-c", f"while [ ! -f '{orch_log_path}' ]; do sleep 1; done; tail -F '{orch_log_path}' 2>/dev/null | grep --line-buffered avg_reward | sed --unbuffered 's/^/[orch]    /'"],
+        )
+
+        tail_processes.extend([trainer_tail, orch_tail])
 
         # Poll for errors until trainer exits.
         # Orchestrator never exits on its own (update_policy_loop keeps it alive),
