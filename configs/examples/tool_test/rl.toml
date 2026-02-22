@@ -1,0 +1,40 @@
+# Tool-calling RL example
+# Trains Qwen3-0.6B on the tool-test environment using GRPO
+# Uses 2 GPUs: 1 inference, 1 trainer
+
+run_id = "tool_test_rl"
+max_steps = 10
+seq_len = 2048
+max_async_level = 1
+clean = true
+
+inference_gpu_ids = [0]
+trainer_gpu_ids = [1]
+
+[model]
+name = "Qwen/Qwen3-0.6B"
+
+[weight_broadcast]
+type = "nccl"
+
+[trainer]
+broadcast_interval = 1
+
+[orchestrator]
+batch_size = 16
+rollouts_per_example = 8
+
+[orchestrator.sampling]
+max_tokens = 384
+
+[[orchestrator.env]]
+id = "primeintellect/tool-test"
+
+[inference]
+gpu_memory_utilization = 0.9
+
+[inference.model]
+max_model_len = 2048
+enforce_eager = true
+enable_auto_tool_choice = true
+tool_call_parser = "hermes"

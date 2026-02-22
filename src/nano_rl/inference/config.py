@@ -53,6 +53,18 @@ class ModelConfig(BaseConfig):
             description="Whether to enforce eager mode. If False, will use PyTorch eager and cuda graphs in hybrid for maximal performance. Passed to vLLM as `--enforce-eager`",
         ),
     ] = False
+    enable_auto_tool_choice: Annotated[
+        bool,
+        Field(
+            description="Enable automatic tool choice detection. Required for tool-calling environments.",
+        ),
+    ] = False
+    tool_call_parser: Annotated[
+        str | None,
+        Field(
+            description="Parser for tool call output format (e.g., 'hermes', 'llama3_json'). Required when enable_auto_tool_choice is True.",
+        ),
+    ] = None
 
 
 class InferenceConfig(BaseSettings):
@@ -85,7 +97,7 @@ class InferenceConfig(BaseSettings):
         return self
 
     def to_vllm_args(self) -> Namespace:
-        return Namespace(
+        args = Namespace(
             host=self.server.host,
             port=self.server.port,
             model=self.model.name,
@@ -101,3 +113,7 @@ class InferenceConfig(BaseSettings):
             # we don't want the raw logits, but actual probabilities
             logprobs_mode="processed_logprobs",
         )
+        if self.model.enable_auto_tool_choice:
+            args.enable_auto_tool_choice = True
+            args.tool_call_parser = self.model.tool_call_parser
+        return args
