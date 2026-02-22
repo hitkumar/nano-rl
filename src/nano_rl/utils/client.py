@@ -1,34 +1,36 @@
 """
-Client util for orchestrtor -> inference communication
+Client util for orchestrator -> inference communication
 """
 
 import asyncio
 from pathlib import Path
 
 import httpx
+import verifiers as vf
 from httpx import AsyncClient
 from loguru import logger
 from nano_rl.utils.config import ClientConfig
-from openai import AsyncOpenAI
+
 
 NCCL_READY_MARKER = "NCCL_READY"
 
 
-def setup_clients(client_config: ClientConfig) -> list[AsyncOpenAI]:
-    """Create OpenAI clients for all inference servers."""
-    timeout = httpx.Timeout(client_config.timeout)
-    limits = httpx.Limits(max_connections=8192, max_keepalive_connections=8192)
+def setup_clients(client_config: ClientConfig) -> list[vf.ClientConfig]:
+    """Create verifiers ClientConfig for all inference servers."""
 
-    def _setup_client(base_url: str) -> AsyncOpenAI:
-        http_client = httpx.AsyncClient(limits=limits, timeout=timeout)
-        return AsyncOpenAI(
-            base_url=base_url,
-            api_key="EMPTY",
+    def _setup_client(client_idx: int, base_url: str) -> vf.ClientConfig:
+        return vf.ClientConfig(
+            client_idx=client_idx,
+            client_type="openai_chat_completions",
+            api_base_url=base_url,
+            api_key_var="OPENAI_API_KEY",
+            timeout=client_config.timeout,
+            max_connections=8192,
+            max_keepalive_connections=8192,
             max_retries=10,
-            http_client=http_client,
         )
 
-    return [_setup_client(url) for url in client_config.base_url]
+    return [_setup_client(idx, url) for idx, url in enumerate(client_config.base_url)]
 
 
 def setup_admin_clients(client_config: ClientConfig) -> list[AsyncClient]:

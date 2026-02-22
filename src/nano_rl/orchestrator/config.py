@@ -159,12 +159,6 @@ class OrchestratorConfig(BaseSettings):
             description="Maximum number of training steps to run. If None, will run indefinitely.",
         ),
     ] = None
-    max_concurrent: Annotated[
-        int | None,
-        Field(
-            description="Maximum number of concurrent rollouts to generate and score. Will create a global semaphore and pass to verifiers Environment. If None, will not limit concurrency.",
-        ),
-    ] = None
     max_async_level: Annotated[
         int,
         Field(

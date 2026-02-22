@@ -5,7 +5,6 @@ Util file to play around with the envs in verifiers
 import asyncio
 
 import verifiers as vf
-from openai import AsyncOpenAI
 
 
 async def main():
@@ -13,10 +12,14 @@ async def main():
     dataset = env.get_dataset()
     print(f"Loaded dataset with {len(dataset)} samples")
     print(f"First sample: {dataset[0]}")
-    client = AsyncOpenAI(base_url="http://localhost:8000/v1", api_key="EMPTY")
 
-    state = await env.run_rollout(
-        asyncio.Semaphore(1),
+    client = vf.ClientConfig(
+        client_type="openai_chat_completions",
+        api_base_url="http://localhost:8000/v1",
+        api_key_var="OPENAI_API_KEY",
+    )
+
+    output = await env.run_rollout(
         vf.RolloutInput(**dataset[0]),
         client,
         "Qwen/Qwen3-0.6B",
@@ -26,11 +29,11 @@ async def main():
             "logprobs": True,
             "extra_body": {"return_token_ids": True},
         },
+        state_columns=["trajectory"],
     )
-    await env.rubric.score_rollout(state, score_sem=asyncio.Semaphore(1))
-    print(f"Reward: {state['reward']}")
-    print(f"Turns: {len(state['trajectory'])}")
-    for i, step in enumerate(state["trajectory"]):
+    print(f"Reward: {output['reward']}")
+    print(f"Turns: {len(output['trajectory'])}")
+    for i, step in enumerate(output["trajectory"]):
         tokens = step["tokens"]
         print(f"\n--- Turn {i} ---")
         print(f"  Prompt tokens: {len(tokens['prompt_ids'])}")

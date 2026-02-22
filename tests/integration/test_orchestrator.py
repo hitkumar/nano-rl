@@ -15,7 +15,6 @@ from nano_rl.orchestrator.config import (
     SamplingConfig,
 )
 from nano_rl.orchestrator.orchestrator import orchestrate
-from nano_rl.orchestrator.utils import set_semaphore
 from nano_rl.transport import setup_training_batch_receiver
 from nano_rl.utils.config import ClientConfig
 
@@ -53,7 +52,7 @@ def config(tmp_path: Path, inference_server) -> OrchestratorConfig:
         batch_size=8,
         rollouts_per_example=4,
         max_steps=2,
-        max_async_level=0,  # synchronous - no weight updates during test
+        max_async_level=2,  # must be >= max_steps since there's no trainer to produce checkpoints
         seq_len=1024,
         sampling=SamplingConfig(temperature=1.0, max_tokens=64),
         advantage=AdvantageConfig(),
@@ -63,7 +62,6 @@ def config(tmp_path: Path, inference_server) -> OrchestratorConfig:
             )
         ],
         client=ClientConfig(base_url=["http://localhost:8000/v1"]),
-        max_concurrent=4,
     )
 
 
@@ -76,8 +74,8 @@ async def test_orchestrator_produces_valid_training_samples(
     receiver = setup_training_batch_receiver(tmp_path, current_step=0)
     batch = receiver.receive()
 
-    # Check ckpt_step is present and valid (should be -1 before any weights are checkpointed)
-    assert batch.ckpt_step == -1
+    # Check ckpt_step is present and valid (0 = base model, no checkpoints yet)
+    assert batch.ckpt_step == 0
 
     for sample in batch.examples:
         # Check all required fields exist and have correct types

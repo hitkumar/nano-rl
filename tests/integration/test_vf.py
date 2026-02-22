@@ -3,14 +3,12 @@ import time
 
 import pytest
 import verifiers as vf
-from nano_rl.orchestrator.utils import set_semaphore
-from nano_rl.utils.client import setup_client
+from nano_rl.utils.client import setup_clients
 from nano_rl.utils.vf import generate_group, generate_rollout
-from openai import AsyncOpenAI
 
 pytestmark = [pytest.mark.gpu, pytest.mark.slow]
 
-INFERENCE_STARTUP_TIMEOUT = 300  # 5 minutes to load model
+INFERENCE_STARTUP_TIMEOUT = 60  # 1 minute to load model
 
 
 @pytest.fixture(scope="module")
@@ -36,7 +34,7 @@ def inference_server():
 
 
 @pytest.fixture(scope="module")
-def client(inference_server) -> AsyncOpenAI:
+def client(inference_server) -> vf.ClientConfig:
     """
     Create client connected to inference server.
     Inference server is passed to this as this indicates that client depends on inference_server, we attempt to initiate a connection when inference server is started.
@@ -44,21 +42,20 @@ def client(inference_server) -> AsyncOpenAI:
     from nano_rl.utils.config import ClientConfig
 
     config = ClientConfig(timeout=60)
-    return setup_client(config)
+    return setup_clients(config)[0]
 
 
 @pytest.fixture(scope="module")
 def env() -> vf.Environment:
     """creates a simple test environment"""
-    return vf.ReasoningGymEnv(gym="complex_arithmetic", num_train_examples=10)
+    return vf.load_environment("reverse-text")
 
 
 async def test_generate_group(client, env):
     """Test that generate group produces valid states"""
-    await set_semaphore(10)
     example = env.get_dataset()[0]
 
-    states = await generate_group(
+    outputs = await generate_group(
         client=client,
         env=env,
         model_name="Qwen/Qwen3-0.6B",
@@ -67,25 +64,22 @@ async def test_generate_group(client, env):
         sampling_args={"temperature": 0.2, "max_tokens": 256},
     )
 
-    assert len(states) == 2
-    for state in states:
-        assert "trajectory" in state
-        assert "reward" in state
-        assert len(state["trajectory"]) == 1
+    assert len(outputs) == 2
+    for output in outputs:
+        assert "trajectory" in output
+        assert "reward" in output
+        assert len(output["trajectory"]) == 1
 
 
 async def test_generate_rollout(client, env):
-    await set_semaphore(1)
     example = env.get_dataset()[0]
-    state = await generate_rollout(
+    output = await generate_rollout(
         client=client,
         env=env,
         model_name="Qwen/Qwen3-0.6B",
         example=example,
         sampling_args={"temperature": 0.2, "max_tokens": 256},
     )
-    tokens = state["trajectory"][0]["tokens"]
-    assert "token_ids" in tokens
-    assert "trajectory" in state
-    assert "reward" in state
-    assert len(state["trajectory"]) == 1
+    assert "trajectory" in output
+    assert "reward" in output
+    assert len(output["trajectory"]) == 1

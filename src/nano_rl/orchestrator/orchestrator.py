@@ -9,7 +9,6 @@ import verifiers as vf
 from nano_rl.orchestrator.advantage import compute_advantages
 from nano_rl.orchestrator.config import OrchestratorConfig
 from nano_rl.orchestrator.scheduler import Scheduler
-from nano_rl.orchestrator.utils import set_semaphore
 from nano_rl.orchestrator.trajectories import interleave_rollout
 from nano_rl.transport import setup_training_batch_sender, TrainingBatch, TrainingSample
 from nano_rl.utils.client import check_health, init_nccl_broadcast, setup_admin_clients, setup_clients
@@ -31,8 +30,6 @@ async def orchestrate(config: OrchestratorConfig) -> None:
     """Main orchestration loop"""
     logger = get_logger()
     logger.info("Starting orchestrator")
-    # limits the number of inference/scoring calls
-    await set_semaphore(config.max_concurrent)
 
     # used for inference server completions calls
     clients = setup_clients(config.client)
@@ -173,9 +170,10 @@ async def orchestrate(config: OrchestratorConfig) -> None:
             except asyncio.CancelledError:
                 pass
 
-        # Keep update_policy_loop running so it can continue relaying
-        # weight updates to inference servers. The orchestrator process
-        # stays alive until the launcher kills it after the trainer exits.
+        # Signal the update_policy_loop to stop, then wait for it to exit.
+        # In production the launcher kills the process, but we stop cleanly
+        # so tests and standalone runs don't hang.
+        scheduler.stop()
         await update_task
 
 

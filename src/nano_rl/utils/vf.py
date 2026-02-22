@@ -23,63 +23,61 @@ reward = rubric.score(extracted, ground_truth)  # 1.0
 from typing import Any
 
 import verifiers as vf
-from nano_rl.orchestrator.utils import get_semaphore
-from openai import AsyncOpenAI
+
+# Required to preserve trajectory data in RolloutOutput
+REQUIRED_STATE_COLUMNS = ["trajectory", "sampling_args"]
 
 
 async def generate_group(
-    client: AsyncOpenAI,
+    client: vf.ClientConfig,
     env: vf.Environment,
     model_name: str,
     example: dict[str, Any],
     rollouts_per_example: int,
     sampling_args: dict[str, Any],
-) -> list[vf.State]:
-    """Generate a group of rollouts for an example, each vf.State corresponds to one rollout"""
-    semaphore = await get_semaphore()
+) -> list[vf.RolloutOutput]:
+    """Generate a group of rollouts for an example, each RolloutOutput corresponds to one rollout"""
     group_inputs = [vf.RolloutInput(**example) for _ in range(rollouts_per_example)]
 
-    states = await env.run_group(
-        group_inputs=group_inputs,
+    return await env.run_group(
+        group_inputs,
         client=client,
         model=model_name,
-        gen_sampling_args=sampling_args,
-        gen_sem=semaphore,
-        score_sem=semaphore,
+        sampling_args=sampling_args,
+        state_columns=REQUIRED_STATE_COLUMNS,
     )
-    return states
 
 
 async def generate_rollout(
-    client: AsyncOpenAI,
+    client: vf.ClientConfig,
     env: vf.Environment,
     model_name: str,
     example: dict[str, Any],
     sampling_args: dict[str, Any],
-) -> vf.State:
+) -> vf.RolloutOutput:
     """Asynchronously generate a single rollout for an example and score it"""
-    semaphore = await get_semaphore()
-
     rollout_input = vf.RolloutInput(**example)
-    state = await env.run_rollout(
-        semaphore, rollout_input, client, model_name, sampling_args
+    return await env.run_rollout(
+        rollout_input,
+        client,
+        model_name,
+        sampling_args,
+        state_columns=REQUIRED_STATE_COLUMNS,
     )
-    await env.rubric.score_rollout(state, score_sem=semaphore)
-    return state
 
 
-def get_completion_len(state: vf.State) -> int:
+def get_completion_len(output: vf.RolloutOutput) -> int:
     """Total completion tokens across all turns."""
-    return sum(len(step["tokens"]["completion_ids"]) for step in state["trajectory"])
+    return sum(len(step["tokens"]["completion_ids"]) for step in output["trajectory"])
 
 
-def get_prompt_len(state: vf.State) -> int:
+def get_prompt_len(output: vf.RolloutOutput) -> int:
     """Length of the initial prompt (first turn only)."""
-    return len(state["trajectory"][0]["tokens"]["prompt_ids"])
+    return len(output["trajectory"][0]["tokens"]["prompt_ids"])
 
 
-def get_seq_len(state: vf.State) -> int:
+def get_seq_len(output: vf.RolloutOutput) -> int:
     """Total sequence length. The last step's prompt contains the full conversation
     history, so prompt + completion of the last step gives the total token count."""
-    last = state["trajectory"][-1]["tokens"]
+    last = output["trajectory"][-1]["tokens"]
     return len(last["prompt_ids"]) + len(last["completion_ids"])

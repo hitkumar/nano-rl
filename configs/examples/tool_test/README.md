@@ -29,15 +29,21 @@ Start an inference server with tool calling enabled, then run eval:
 ```bash
 CUDA_VISIBLE_DEVICES=0 uv run inference --model.name Qwen/Qwen3-0.6B --model.enable-auto-tool-choice true --model.tool-call-parser hermes
 
-VLLM_API_KEY=x uv run python -m verifiers.scripts.eval primeintellect/tool-test -m Qwen/Qwen3-0.6B -b http://localhost:8000/v1 -k VLLM_API_KEY -n 20 -r 4 -t 768 -c 1
+uv run python src/nano_rl/utils/vf_tool_env_inspect.py eval -n 20 -r 4
 ```
 
-To evaluate a checkpoint, replace the model name with the checkpoint path:
+To evaluate a checkpoint, replace the model name:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 uv run inference --model.name outputs/tool_test_rl/weights/step_10 --model.enable-auto-tool-choice true --model.tool-call-parser hermes
 
-VLLM_API_KEY=x uv run python -m verifiers.scripts.eval primeintellect/tool-test -m outputs/tool_test_rl/weights/step_10 -b http://localhost:8000/v1 -k VLLM_API_KEY -n 20 -r 4 -t 768 -c 1
+uv run python src/nano_rl/utils/vf_tool_env_inspect.py eval -n 20 -r 4 -m outputs/tool_test_rl/weights/step_10
+```
+
+To inspect a single rollout with detailed tool call / tool response output:
+
+```bash
+uv run python src/nano_rl/utils/vf_tool_env_inspect.py inspect
 ```
 
 ## Results

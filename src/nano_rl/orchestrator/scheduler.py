@@ -21,10 +21,8 @@ from nano_rl.utils.pathing import (
     get_broadcasts_dir,  # output_dir / "broadcasts"
     get_step_path,  # weights_dir / "step_{n}"
     resolve_latest_ckpt_dir,  # Find newest ckpt number
-    wait_for_path,  # Async wait for file to appear
 )
 from nano_rl.utils.vf import generate_group, get_seq_len  # Rollout generation
-from openai import AsyncOpenAI
 
 
 @dataclass
@@ -83,7 +81,7 @@ class Scheduler:
     def __init__(
         self,
         config: OrchestratorConfig,
-        clients: list[AsyncOpenAI],
+        clients: list[vf.ClientConfig],
         admin_clients: list[AsyncClient],
         envs: list[vf.Environment],
         # unused for now, we directly get the examples from the envs
@@ -153,14 +151,14 @@ class Scheduler:
             await self._update_policy()
             await asyncio.sleep(0.5)  # Poll every 500ms
 
-    def _get_next_client(self) -> AsyncOpenAI:
+    def _get_next_client(self) -> vf.ClientConfig:
         """Get next client from round-robin cycle"""
         return next(self.client_cycle)
 
     async def schedule_group_rollout(
-        self, env: vf.Environment, example: dict[str, Any], client: AsyncOpenAI
-    ) -> list[vf.State]:
-        client_url = str(client.base_url)
+        self, env: vf.Environment, example: dict[str, Any], client: vf.ClientConfig
+    ) -> list[vf.RolloutOutput]:
+        client_url = client.api_base_url
         start = time.perf_counter()
         states = await generate_group(
             client=client,
@@ -173,7 +171,7 @@ class Scheduler:
         elapsed = time.perf_counter() - start
 
         # Count tokens generated (prompt + completion to match trainer's token counting)
-        total_tokens = sum(get_seq_len(state) for state in states)
+        total_tokens = sum(get_seq_len(output) for output in states)
 
         self.stats.record_rollout(
             client_url=client_url,
@@ -188,7 +186,7 @@ class Scheduler:
         )
         return states
 
-    async def generate_batch(self, step: int) -> list[vf.State]:
+    async def generate_batch(self, step: int) -> list[vf.RolloutOutput]:
         """Generates a batch of rollouts for training step"""
         self.step = step
         batch_start = time.perf_counter()
@@ -222,7 +220,7 @@ class Scheduler:
             all_states.extend(result)
 
         # Count tokens in this batch for throughput calculation
-        batch_tokens = sum(get_seq_len(state) for state in all_states)
+        batch_tokens = sum(get_seq_len(output) for output in all_states)
         rollout_time = time.perf_counter() - batch_start
         self.stats.record_batch(batch_time=rollout_time, batch_tokens=batch_tokens)
 

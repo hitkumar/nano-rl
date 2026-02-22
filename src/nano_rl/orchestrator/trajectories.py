@@ -57,7 +57,7 @@ def extend_sample(
     sample.completion_logprobs.extend(tokens["completion_logprobs"])
 
 
-def interleave_rollout(output: vf.State) -> list[TrainingSample] | None:
+def interleave_rollout(output: vf.RolloutOutput) -> list[TrainingSample] | None:
     """Convert a rollout output into one or more TrainingSamples.
 
     Walks all trajectory steps and merges consecutive steps that share token

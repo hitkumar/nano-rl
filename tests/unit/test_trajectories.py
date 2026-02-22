@@ -24,6 +24,8 @@ def _make_step(prompt_ids, completion_ids, completion_logprobs, completion_mask=
         ),
         reward=None,
         advantage=None,
+        is_truncated=False,
+        trajectory_id="test",
         extras={},
     )
 
