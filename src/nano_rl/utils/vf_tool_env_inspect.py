@@ -1,22 +1,39 @@
 """
 Inspect and evaluate tool-calling environments in verifiers.
 
-Workaround: verifiers 0.1.11+ uses Pydantic messages where AssistantMessage.tool_calls
-defaults to None (not absent). The upstream tool-test reward function uses
-.get("tool_calls", []) which returns None instead of [] because getattr finds
-the attribute. We override the reward function here to handle this.
+Verifiers rollout behavior:
+    A rollout is a sequence of turns. Each turn is a (prompt, completion) pair
+    where the completion is always an assistant response. If the response contains
+    a tool call, the tool is executed and the result is appended to the next
+    turn's prompt. If there is no tool call (just text), the rollout ends.
+
+        Turn 0: prompt → assistant (tool_call)
+        Turn 1: prompt + tool_result → assistant (tool_call or error recovery)
+        Turn 2: prompt + tool_result → assistant (final text with \\boxed{})
+
+    Termination conditions:
+        - The assistant produces a response without tool calls
+        - max_turns is reached
+
+    Each turn's prompt contains the full conversation history up to that point.
+    The dataset provides top-level keys: question, answer, prompt, task.
+
+Environments:
+    - math-python: model solves math problems by calling python() tool (default)
+    - tool-test: upstream primeintellect/tool-test (install via primeintellect index)
 
 Usage:
     Start the inference server with tool calling enabled:
-        uv run inference --model.name Qwen/Qwen3-0.6B \
+        uv run inference --model.name Qwen/Qwen3-0.6B \\
             --model.enable-auto-tool-choice true --model.tool-call-parser hermes
 
     Inspect a single rollout:
         uv run python src/nano_rl/utils/vf_tool_env_inspect.py inspect
+        uv run python src/nano_rl/utils/vf_tool_env_inspect.py inspect -i 37
+        uv run python src/nano_rl/utils/vf_tool_env_inspect.py -e tool-test inspect
 
-    Batch eval (like prime eval run):
+    Batch eval:
         uv run python src/nano_rl/utils/vf_tool_env_inspect.py eval -n 20 -r 4
-        uv run python src/nano_rl/utils/vf_tool_env_inspect.py eval -n 20 -r 4 -m outputs/runs/tool_test_rl/weights/step_10
 """
 
 import argparse
@@ -24,6 +41,8 @@ import asyncio
 import random
 
 import verifiers as vf
+
+from nano_rl.envs.math_python import load_environment as load_math_python_env
 
 
 def tool_call_reward(completion, info):
@@ -48,25 +67,28 @@ def print_message(msg):
         print(f"    [{role}] {content}")
 
 
-def load_env():
+def load_env(env_name: str) -> vf.ToolEnv:
+    if env_name == "math-python":
+        return load_math_python_env()
+
     env = vf.load_environment("primeintellect/tool-test")
-    # Replace the original reward function in the rubric.
-    # env.rubric is a RubricGroup [original_rubric, ToolMonitorRubric, MultiTurnMonitorRubric].
-    # The original rubric (rubrics[0]) has tool_call_reward_func which crashes on
-    # Pydantic messages because .get("tool_calls", []) returns None instead of [].
+    # Workaround: verifiers 0.1.11+ uses Pydantic messages where AssistantMessage.tool_calls
+    # defaults to None (not absent). The upstream reward function uses .get("tool_calls", [])
+    # which returns None instead of []. Override to handle this.
     env.rubric.rubrics[0].funcs = [tool_call_reward]
     env.rubric.rubrics[0].weights = [1.0]
     return env
 
 
 async def inspect(args):
-    env = load_env()
-    env.max_turns = 2
+    env = load_env(args.env)
     dataset = env.get_dataset()
-    sample = dataset[0]
+    sample = dataset[args.index]
+    print(f"Environment: {args.env}")
     print(f"Tools: {[t.__name__ for t in env.tools]}")
+    print(f"Max turns: {env.max_turns}")
     print(f"Prompt: {sample['prompt'][-1]['content']}")
-    print(f"Expected: {sample['info']['tool_names']}")
+    print(f"Answer: {sample.get('answer', sample.get('info', {}).get('answer', 'N/A'))}")
 
     client = vf.ClientConfig(
         client_type="openai_chat_completions",
@@ -77,7 +99,7 @@ async def inspect(args):
         vf.RolloutInput(**sample),
         client,
         args.model,
-        {"temperature": 1.0, "max_tokens": 768, "logprobs": True, "extra_body": {"return_token_ids": True}},
+        {"temperature": 1.0, "max_tokens": 2048, "logprobs": True, "extra_body": {"return_token_ids": True}},
         state_columns=["trajectory"],
     )
 
@@ -96,7 +118,7 @@ async def inspect(args):
 
 
 async def eval_batch(args):
-    env = load_env()
+    env = load_env(args.env)
     eval_dataset = env.get_eval_dataset()
     examples = random.sample(list(eval_dataset), min(args.num_examples, len(eval_dataset)))
 
@@ -135,9 +157,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-m", "--model", default="Qwen/Qwen3-0.6B")
     parser.add_argument("-b", "--base-url", default="http://localhost:8000/v1")
+    parser.add_argument("-e", "--env", default="math-python", choices=["math-python", "tool-test"])
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("inspect")
+    inspect_parser = sub.add_parser("inspect")
+    inspect_parser.add_argument("-i", "--index", type=int, default=0)
 
     eval_parser = sub.add_parser("eval")
     eval_parser.add_argument("-n", "--num-examples", type=int, default=20)
